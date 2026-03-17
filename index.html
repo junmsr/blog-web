@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VOID.BLOG</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;600;700;800&family=Syne+Mono&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- BACKGROUND LAYERS -->
+  <div class="bg-grid"></div>
+  <div class="bg-orbs">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+  </div>
+  <div class="noise-overlay"></div>
+
+  <!-- APP WRAPPER -->
+  <div id="app">
+
+    <!-- ── HEADER ── -->
+    <header id="site-header">
+      <div class="viewer-banner" id="viewer-banner">
+        👁 View-only mode — You are accessing a shared post link
+      </div>
+      <div class="header-inner">
+        <div class="logo" id="site-logo" onclick="showView('home')">
+          VOID<span>.</span>BLOG
+        </div>
+        <div class="header-nav" id="header-nav">
+          <span class="owner-badge" id="owner-badge" style="display:none;">Owner</span>
+          <button class="nav-pill active" id="nav-home" onclick="showView('home')">Feed</button>
+          <button class="nav-pill" id="nav-about" onclick="showView('about')">About</button>
+          <button class="nav-write" id="nav-write" onclick="showView('write')" style="display:none;">+ Write</button>
+          <button class="logout-btn" id="logout-btn" onclick="logout()" style="display:none;">Logout</button>
+          <button class="login-btn-small" id="login-btn-small" onclick="openPwdModal()">🔐 Login</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- ── MAIN ── -->
+    <main>
+
+      <!-- HOME VIEW -->
+      <div class="view active" id="view-home">
+        <div class="home-hero">
+          <div class="home-hero-tag">Digital Thoughts</div>
+          <h1 class="home-title">Where <span class="accent">ideas</span><br>go <span class="accent2">live.</span></h1>
+          <p class="home-desc" id="home-desc">A personal stream of essays, experiments, and reflections.</p>
+          <div class="stats-row" id="stats-row"></div>
+        </div>
+        <div class="section-heading">
+          <div class="section-title">Published</div>
+          <span class="post-count-badge" id="post-count-badge">0 posts</span>
+        </div>
+        <div id="home-content"></div>
+      </div>
+
+      <!-- WRITE VIEW -->
+      <div class="view" id="view-write">
+        <div class="write-top">
+          <div>
+            <h2 class="write-heading" id="write-heading">New Post</h2>
+            <p class="write-subheading">Craft something worth reading.</p>
+          </div>
+        </div>
+        <div class="write-layout">
+
+          <!-- Main Editor Column -->
+          <div class="editor-main">
+            <div class="field">
+              <label for="post-title">Title</label>
+              <input type="text" id="post-title" class="input-title" placeholder="Your post title..." />
+            </div>
+            <div class="field">
+              <label for="post-excerpt">Subtitle / Excerpt</label>
+              <input type="text" id="post-excerpt" placeholder="A hook for your readers..." />
+            </div>
+            <div class="field">
+              <label>Content <span class="label-hint">(Markdown supported)</span></label>
+              <div class="toolbar">
+                <button class="tb-btn" onclick="ins('**','**')" title="Bold"><b>B</b></button>
+                <button class="tb-btn" onclick="ins('*','*')" title="Italic"><i>I</i></button>
+                <button class="tb-btn" onclick="insLine('## ')" title="Heading 2">H2</button>
+                <button class="tb-btn" onclick="insLine('### ')" title="Heading 3">H3</button>
+                <button class="tb-btn" onclick="insLine('> ')" title="Blockquote">❝</button>
+                <button class="tb-btn" onclick="insLine('- ')" title="List">• List</button>
+                <button class="tb-btn" onclick="ins('`','`')" title="Inline code">&lt;/&gt;</button>
+                <button class="tb-btn" onclick="insBlock('```\n','\n```')" title="Code block">{ }</button>
+                <button class="tb-btn" onclick="insLine('---')" title="Divider">—</button>
+              </div>
+              <textarea id="post-content" class="content-ta" placeholder="Write your thoughts here...&#10;&#10;Markdown: **bold**, *italic*, ## Heading, > blockquote, `code`"></textarea>
+              <div class="word-count" id="word-count">0 words</div>
+            </div>
+          </div>
+
+          <!-- Sidebar Column -->
+          <div class="editor-sidebar">
+
+            <div class="side-panel">
+              <h3>Cover Image</h3>
+              <div class="upload-zone" id="cover-zone">
+                <input type="file" id="cover-input" accept="image/*" onchange="handleCover(this)" />
+                <div id="cover-inner">
+                  <div class="upload-icon">🖼</div>
+                  <div class="upload-text">Click or drag image</div>
+                </div>
+              </div>
+              <div id="cover-preview-wrap" style="display:none;">
+                <img id="cover-preview" class="cover-thumb" src="" alt="Cover preview" />
+                <button class="btn-remove" onclick="removeCover()">✕ Remove</button>
+              </div>
+            </div>
+
+            <div class="side-panel">
+              <h3>Tags</h3>
+              <div class="tags-wrap" id="tags-wrap" onclick="document.getElementById('tag-input').focus()">
+                <input type="text" id="tag-input" class="tag-real-input" placeholder="Tag + Enter" />
+              </div>
+            </div>
+
+            <div class="side-panel">
+              <h3>Publish</h3>
+              <button class="btn-primary" onclick="publishPost()">⚡ Publish</button>
+              <button class="btn-outline" onclick="saveDraft()">💾 Save Draft</button>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- POST VIEW -->
+      <div class="view" id="view-post">
+        <div class="post-view-wrap" id="pv-content"></div>
+      </div>
+
+      <!-- ABOUT VIEW -->
+      <div class="view" id="view-about">
+        <div class="about-wrap">
+          <div class="about-card">
+            <div class="about-top">
+              <div class="avatar" id="av-display">V</div>
+              <div>
+                <div class="about-name" id="abt-name">Author</div>
+                <div class="about-handle" id="abt-handle">@void</div>
+              </div>
+            </div>
+            <div class="about-bio" id="abt-bio">Welcome to my blog. This is where I share ideas, stories, and experiments.</div>
+            <div id="about-edit-wrap" style="margin-top:1.5rem;"></div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div><!-- /#app -->
+
+  <!-- ── PASSWORD MODAL ── -->
+  <div class="modal-bg" id="pwd-modal">
+    <div class="modal-box">
+      <h3 id="pwd-modal-title">🔐 Owner Access</h3>
+      <p id="pwd-modal-desc">Enter your password to unlock write &amp; manage capabilities.</p>
+      <div class="field">
+        <label for="pwd-input">Password</label>
+        <input type="password" id="pwd-input" placeholder="Enter password..." onkeydown="if(event.key==='Enter') tryLogin()" />
+      </div>
+      <div id="pwd-error" class="field-error" style="display:none;">Incorrect password. Try again.</div>
+      <button class="btn-primary" onclick="tryLogin()" style="margin-top:0.75rem;">Unlock</button>
+      <button class="btn-outline" id="pwd-cancel-btn" onclick="closePwdModal()" style="margin-top:0.5rem;">Continue as Viewer</button>
+    </div>
+  </div>
+
+  <!-- ── DELETE MODAL ── -->
+  <div class="modal-bg" id="del-modal">
+    <div class="modal-box">
+      <h3>Delete Post?</h3>
+      <p>This will permanently remove the post. You cannot undo this.</p>
+      <div class="modal-actions">
+        <button class="btn-outline" onclick="closeDelModal()">Cancel</button>
+        <button class="btn-danger" onclick="confirmDelete()">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TOAST ── -->
+  <div class="toast" id="toast"></div>
+  <script>
+    window.SUPABASE_URL = 'https://qgdkiyboxwcqvrvzvnxu.supabase.co'
+    window.SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFnZGtpeWJveHdjcXZydnp2bnh1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3MTM3NzMsImV4cCI6MjA4OTI4OTc3M30.iqLLzpHtqhrqILZAymHQgU7zNIdFTFdCUt-zGooNVKQ'
+  </script>
+  <script src="app.js"></script>
+ </body>
+</html>
