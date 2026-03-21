@@ -340,18 +340,17 @@ function openPost(id, isSharedLink = false) {
   const post = posts.find(p => p.id === id);
   if (!post) { toast('Post not found.', 'error'); return; }
 
-  // Set share hash in URL
-  window.location.hash = `#post/${id}`;
+  // Keep encoded hash when viewing from shared link, else allow local ID navigation
+  const activeHash = isSharedLink ? encodePostData(post) : post.id;
+  window.location.hash = `#post/${activeHash}`;
 
   // Generate shareable URL with encoded post data
   let shareUrl;
   if (isOwner && !isSharedLink) {
-    // Owner generates link with encoded data for sharing
     const encodedData = encodePostData(post);
     shareUrl = `${window.location.origin}${window.location.pathname}#post/${encodedData}`;
   } else {
-    // Use original ID for local access
-    shareUrl = `${window.location.origin}${window.location.pathname}#post/${id}`;
+    shareUrl = `${window.location.origin}${window.location.pathname}#post/${activeHash}`;
   }
 
   const viewerNotice = isViewerMode
@@ -786,9 +785,10 @@ function renderMarkdown(md) {
 // ══════════════════════════════════════════
 function encodePostData(post) {
   try {
-    // Compress post data to base64
     const json = JSON.stringify(post);
-    return btoa(json); // Base64 encode
+    // handle unicode + make URL-safe
+    const base64 = btoa(unescape(encodeURIComponent(json)));
+    return encodeURIComponent(base64);
   } catch (e) {
     console.error('Encoding failed:', e);
     return post.id; // Fallback to ID only
@@ -797,14 +797,14 @@ function encodePostData(post) {
 
 function decodePostData(encoded) {
   try {
-    // If it looks like a base64-encoded post (longer than typical ID)
-    if (encoded.length > 20) {
-      const json = atob(encoded); // Base64 decode
-      const post = JSON.parse(json);
-      // Validate it has required fields
-      if (post.title && post.content && post.id) {
-        return post;
-      }
+    if (!encoded || encoded.length <= 20) return null;
+
+    const decodedUri = decodeURIComponent(encoded);
+    const json     = decodeURIComponent(escape(atob(decodedUri)));
+    const post     = JSON.parse(json);
+
+    if (post && post.title && post.content && post.id) {
+      return post;
     }
   } catch (e) {
     console.error('Decoding failed:', e);
