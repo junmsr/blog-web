@@ -1,313 +1,94 @@
 /* ══════════════════════════════════════════
    VOID.BLOG — app.js
-   Storage: Supabase (PostgreSQL + Storage)
-   Auth:    Password hash stored in Supabase
    ══════════════════════════════════════════ */
 
-// ── SUPABASE CLIENT ───────────────────────
-const { createClient } = supabase;
-const db = createClient(window.SUPABASE_URL, window.SUPABASE_ANON);
-
-// ── SESSION KEY (owner flag lives in sessionStorage only) ─────
-const KEY_AUTH = 'vb_authed';
+// ── STORAGE KEYS ──────────────────────────
+const KEY_PWD   = 'vb_owner_pwd';
+const KEY_POSTS = 'vb_posts';
+const KEY_ABOUT = 'vb_about';
+const KEY_AUTH  = 'vb_authed';
 
 // ── STATE ─────────────────────────────────
-let isOwner      = false;   // true = logged-in owner
-let isViewerMode = false;   // true = arrived via share link
-let posts        = [];      // loaded from Supabase
-let about        = {};      // loaded from Supabase
+let isOwner      = false;
+let isViewerMode = false;
+let posts        = JSON.parse(localStorage.getItem(KEY_POSTS) || '[]');
+let about        = JSON.parse(localStorage.getItem(KEY_ABOUT) || '{"name":"Author","handle":"@void","bio":"Welcome to my blog. This is where I share ideas, stories, and experiments."}');
 let tags         = [];
-let coverData    = null;    // base64 preview; uploaded to Storage on save
+let coverData    = null;
 let editingId    = null;
 let deleteId     = null;
 let isSetupMode  = false;
 
 // ══════════════════════════════════════════
-// BOOT — entry point
+// BOOT
 // ══════════════════════════════════════════
-async function boot() {
-  showLoading(true);
+function boot() {
+  const hash = window.location.hash;
 
-  // 1. Restore owner session BEFORE checking the URL hash.
-  //    This prevents a leftover #post/... hash in the owner's browser
-  //    from accidentally triggering viewer mode on reload.
-  if (sessionStorage.getItem(KEY_AUTH) === '1') isOwner = true;
-
-  // 2. Detect share link  (#post/<uuid>)
-  const hash   = window.location.hash;
-  const postId = hash.startsWith('#post/') ? hash.slice(6).split('?')[0].trim() : null;
-
-  if (postId && !isOwner) {
-    // ── External viewer arriving via share link ──
+  // Shared post link — viewer mode
+  if (hash.startsWith('#post/')) {
+    const postId = hash.slice(6);
     isViewerMode = true;
+    isOwner      = false;
     applyMode();
-    await loadAbout();
-    updateAboutSidebar();
-    await openPost(postId);
-    showLoading(false);
+    const post = posts.find(p => p.id === postId && p.status === 'published');
+    if (post) {
+      openPost(postId);
+    } else {
+      showView('home');
+      toast('Post not found or no longer available.', 'error');
+    }
     return;
   }
 
-  if (postId && isOwner) {
-    // ── Owner clicked their own share link / reloaded on post page ──
-    // Clean the hash so it doesn't persist, then open the post in owner mode.
-    history.replaceState('', document.title, window.location.pathname);
-    await loadAbout();
-    await loadPosts();
-    updateAboutSidebar();
-    applyMode();
-    showLoading(false);
-    await openPost(postId);
-    return;
+  // Normal load — restore session auth
+  if (sessionStorage.getItem(KEY_AUTH) === '1') {
+    isOwner = true;
   }
-
-  // 3. Normal home load
-  await loadAbout();
-  await loadPosts();
-  updateAboutSidebar();
   applyMode();
-  showLoading(false);
 
-  // 4. Check if owner password has been set up yet
-  const { data: pwdRow } = await db
-    .from('settings')
-    .select('value')
-    .eq('key', 'owner_pwd_hash')
-    .maybeSingle();
-
-  if (!pwdRow) {
-    showSetupModal();   // first-ever launch
+  const hasPwd = localStorage.getItem(KEY_PWD);
+  if (!hasPwd) {
+    showSetupModal();       // first launch: create password
   } else if (!isOwner) {
-    openPwdModal();     // returning visitor — prompt login
+    openPwdModal();         // returning visitor: prompt login
   }
 
   renderHome();
+  updateAboutSidebar();
 }
 
 // ══════════════════════════════════════════
-// LOADING OVERLAY
+// MODE MANAGEMENT
 // ══════════════════════════════════════════
-function showLoading(show) {
-  let el = document.getElementById('loading-overlay');
-  if (!el) {
-    el = document.createElement('div');
-    el.id = 'loading-overlay';
-    el.innerHTML = `<div class="loading-spinner"></div>`;
-    Object.assign(el.style, {
-      position: 'fixed', inset: '0',
-      background: 'rgba(8,11,16,0.92)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      zIndex: '9000', transition: 'opacity 0.3s',
-    });
-    const s = document.createElement('style');
-    s.textContent = `
-      .loading-spinner {
-        width:36px; height:36px;
-        border:2px solid rgba(0,245,212,0.15);
-        border-top-color:#00f5d4;
-        border-radius:50%;
-        animation:spin 0.7s linear infinite;
-      }
-      @keyframes spin { to { transform:rotate(360deg); } }`;
-    document.head.appendChild(s);
-    document.body.appendChild(el);
-  }
-  el.style.opacity       = show ? '1' : '0';
-  el.style.pointerEvents = show ? 'all' : 'none';
-}
+function applyMode() {
+  const ownerBadge  = document.getElementById('owner-badge');
+  const navWrite    = document.getElementById('nav-write');
+  const logoutBtn   = document.getElementById('logout-btn');
+  const loginSmall  = document.getElementById('login-btn-small');
+  const viewBanner  = document.getElementById('viewer-banner');
+  const navAbout    = document.getElementById('nav-about');
 
-// ══════════════════════════════════════════
-// DATABASE — READ
-// ══════════════════════════════════════════
-async function loadPosts() {
-  const { data, error } = await db
-    .from('posts')
-    .select('*')
-    .order('created_at', { ascending: false });
-
-  if (error) { console.error('[loadPosts]', error); return; }
-  posts = (data || []).map(rowToPost);
-}
-
-async function loadAbout() {
-  const { data, error } = await db
-    .from('settings')
-    .select('key, value')
-    .in('key', ['about_name', 'about_handle', 'about_bio', 'about_avatar']);
-
-  if (error) { console.error('[loadAbout]', error); return; }
-
-  about = {};
-  (data || []).forEach(r => { about[r.key.replace('about_', '')] = r.value; });
-  if (!about.name)   about.name   = 'Author';
-  if (!about.handle) about.handle = '@void';
-  if (!about.bio)    about.bio    = 'Welcome to my blog.';
-}
-
-// DB row (snake_case) → app object (camelCase)
-function rowToPost(r) {
-  return {
-    id:        r.id,
-    title:     r.title     || '',
-    excerpt:   r.excerpt   || '',
-    content:   r.content   || '',
-    tags:      r.tags      || [],
-    cover:     r.cover_url || null,
-    status:    r.status,
-    createdAt: new Date(r.created_at).getTime(),
-    updatedAt: new Date(r.updated_at).getTime(),
-  };
-}
-
-// ══════════════════════════════════════════
-// DATABASE — WRITE
-// ══════════════════════════════════════════
-async function dbSavePost(data, id = null) {
-  const row = {
-    title:      data.title,
-    excerpt:    data.excerpt,
-    content:    data.content,
-    tags:       data.tags,
-    cover_url:  data.cover,
-    status:     data.status,
-    updated_at: new Date().toISOString(),
-  };
-
-  if (id) {
-    const { data: saved, error } = await db
-      .from('posts').update(row).eq('id', id).select().single();
-    if (error) throw error;
-    return rowToPost(saved);
+  if (isViewerMode) {
+    viewBanner.classList.add('visible');
+    ownerBadge.style.display  = 'none';
+    navWrite.style.display    = 'none';
+    logoutBtn.style.display   = 'none';
+    loginSmall.style.display  = 'none';
+    navAbout.style.display    = 'none';
+  } else if (isOwner) {
+    viewBanner.classList.remove('visible');
+    ownerBadge.style.display  = 'inline-flex';
+    navWrite.style.display    = 'inline-flex';
+    logoutBtn.style.display   = 'inline-flex';
+    loginSmall.style.display  = 'none';
   } else {
-    row.created_at = new Date().toISOString();
-    const { data: saved, error } = await db
-      .from('posts').insert(row).select().single();
-    if (error) throw error;
-    return rowToPost(saved);
+    viewBanner.classList.remove('visible');
+    ownerBadge.style.display  = 'none';
+    navWrite.style.display    = 'none';
+    logoutBtn.style.display   = 'none';
+    loginSmall.style.display  = 'inline-flex';
   }
-}
-
-async function dbDeletePost(id) {
-  const { error } = await db.from('posts').delete().eq('id', id);
-  if (error) throw error;
-}
-
-async function dbSaveSetting(key, value) {
-  const { error } = await db
-    .from('settings')
-    .upsert({ key, value }, { onConflict: 'key' });
-  if (error) throw error;
-}
-
-// ── Upload image → Supabase Storage → return public URL ──
-async function uploadImage(base64, storagePath) {
-  const [meta, b64] = base64.split(',');
-  const mime   = meta.match(/:(.*?);/)[1];
-  const ext    = mime.split('/')[1];
-  const bin    = atob(b64);
-  const arr    = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-  const blob   = new Blob([arr], { type: mime });
-  const fname  = `${storagePath}-${Date.now()}.${ext}`;
-
-  const { error } = await db.storage
-    .from('blog-assets')
-    .upload(fname, blob, { upsert: true, contentType: mime });
-  if (error) throw error;
-
-  const { data } = db.storage.from('blog-assets').getPublicUrl(fname);
-  return data.publicUrl;
-}
-
-// ══════════════════════════════════════════
-// AUTH
-// ══════════════════════════════════════════
-function showSetupModal() {
-  isSetupMode = true;
-  document.getElementById('pwd-modal-title').textContent  = '🛠 Set Owner Password';
-  document.getElementById('pwd-modal-desc').textContent   =
-    'Create a password to protect owner access. Anyone with a share link gets view-only access automatically — no account needed.';
-  document.getElementById('pwd-cancel-btn').style.display = 'none';
-  document.getElementById('pwd-error').style.display      = 'none';
-  document.getElementById('pwd-modal').classList.add('open');
-}
-
-function openPwdModal() {
-  isSetupMode = false;
-  document.getElementById('pwd-modal-title').textContent  = '🔐 Owner Access';
-  document.getElementById('pwd-modal-desc').textContent   =
-    'Enter your password to unlock write & manage capabilities.';
-  document.getElementById('pwd-cancel-btn').style.display = 'inline-flex';
-  document.getElementById('pwd-error').style.display      = 'none';
-  document.getElementById('pwd-input').value              = '';
-  document.getElementById('pwd-modal').classList.add('open');
-  setTimeout(() => document.getElementById('pwd-input').focus(), 100);
-}
-
-function closePwdModal() {
-  document.getElementById('pwd-modal').classList.remove('open');
-  document.getElementById('pwd-input').value = '';
-}
-
-async function tryLogin() {
-  const val   = document.getElementById('pwd-input').value;
-  const errEl = document.getElementById('pwd-error');
-
-  if (!val.trim()) {
-    errEl.textContent = 'Please enter a password.';
-    errEl.style.display = 'block';
-    return;
-  }
-
-  const hash = await sha256(val);
-
-  if (isSetupMode) {
-    try {
-      await dbSaveSetting('owner_pwd_hash', hash);
-      isOwner = true;
-      sessionStorage.setItem(KEY_AUTH, '1');
-      closePwdModal();
-      applyMode();
-      await loadPosts();
-      renderHome();
-      toast("Password set! You're the owner ⚡", 'success');
-    } catch (e) {
-      errEl.textContent   = 'Could not save — check your Supabase connection.';
-      errEl.style.display = 'block';
-      console.error('[tryLogin setup]', e);
-    }
-    return;
-  }
-
-  // Verify against hash stored in Supabase
-  try {
-    const { data } = await db
-      .from('settings').select('value').eq('key', 'owner_pwd_hash').single();
-
-    if (data && data.value === hash) {
-      isOwner = true;
-      sessionStorage.setItem(KEY_AUTH, '1');
-      closePwdModal();
-      applyMode();
-      await loadPosts();
-      renderHome();
-      toast('Welcome back, owner ⚡', 'success');
-    } else {
-      errEl.textContent   = 'Incorrect password. Try again.';
-      errEl.style.display = 'block';
-      document.getElementById('pwd-input').select();
-    }
-  } catch (e) {
-    errEl.textContent   = 'Connection error — check your Supabase config.';
-    errEl.style.display = 'block';
-    console.error('[tryLogin verify]', e);
-  }
-}
-
-// SHA-256 via native Web Crypto — no libraries needed
-async function sha256(message) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(message));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 function logout() {
@@ -320,38 +101,80 @@ function logout() {
 }
 
 // ══════════════════════════════════════════
-// MODE MANAGEMENT
+// AUTH MODAL
 // ══════════════════════════════════════════
-function applyMode() {
-  const show = (id, val) => {
-    const el = document.getElementById(id);
-    if (el) el.style.display = val;
-  };
-  const banner = document.getElementById('viewer-banner');
+function showSetupModal() {
+  isSetupMode = true;
+  const m = document.getElementById('pwd-modal');
+  document.getElementById('pwd-modal-title').textContent   = '🛠 Set Owner Password';
+  document.getElementById('pwd-modal-desc').textContent    = 'Create a password to protect owner access. Readers who open a shared post link get view-only access automatically.';
+  document.getElementById('pwd-cancel-btn').style.display  = 'none';
+  document.getElementById('pwd-error').style.display       = 'none';
+  m.classList.add('open');
+}
 
-  if (isViewerMode) {
-    banner && banner.classList.add('visible');
-    show('owner-badge',    'none');
-    show('nav-write',      'none');
-    show('logout-btn',     'none');
-    show('login-btn-small','none');
-    show('nav-about',      'none');
-  } else if (isOwner) {
-    banner && banner.classList.remove('visible');
-    show('owner-badge',    'inline-flex');
-    show('nav-write',      'inline-flex');
-    show('logout-btn',     'inline-flex');
-    show('login-btn-small','none');
-    show('nav-about',      '');
+function openPwdModal() {
+  isSetupMode = false;
+  const m = document.getElementById('pwd-modal');
+  document.getElementById('pwd-modal-title').textContent   = '🔐 Owner Access';
+  document.getElementById('pwd-modal-desc').textContent    = 'Enter your password to unlock write & manage capabilities.';
+  document.getElementById('pwd-cancel-btn').style.display  = 'inline-flex';
+  document.getElementById('pwd-error').style.display       = 'none';
+  document.getElementById('pwd-input').value               = '';
+  m.classList.add('open');
+  setTimeout(() => document.getElementById('pwd-input').focus(), 100);
+}
+
+function closePwdModal() {
+  document.getElementById('pwd-modal').classList.remove('open');
+  document.getElementById('pwd-input').value = '';
+}
+
+function tryLogin() {
+  const val = document.getElementById('pwd-input').value;
+  const errEl = document.getElementById('pwd-error');
+
+  if (!val.trim()) {
+    errEl.textContent = 'Please enter a password.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  if (isSetupMode) {
+    // Save new password (base64 encoded — lightweight obfuscation)
+    localStorage.setItem(KEY_PWD, btoa(val));
+    isOwner = true;
+    sessionStorage.setItem(KEY_AUTH, '1');
+    closePwdModal();
+    applyMode();
+    renderHome();
+    toast('Password set! You\'re the owner ⚡', 'success');
+    return;
+  }
+
+  const stored = localStorage.getItem(KEY_PWD);
+  if (stored && atob(stored) === val) {
+    isOwner = true;
+    sessionStorage.setItem(KEY_AUTH, '1');
+    closePwdModal();
+    applyMode();
+    renderHome();
+    toast('Welcome back, owner ⚡', 'success');
   } else {
-    banner && banner.classList.remove('visible');
-    show('owner-badge',    'none');
-    show('nav-write',      'none');
-    show('logout-btn',     'none');
-    show('login-btn-small','inline-flex');
-    show('nav-about',      '');
+    errEl.textContent = 'Incorrect password. Try again.';
+    errEl.style.display = 'block';
+    document.getElementById('pwd-input').select();
   }
 }
+
+// Close modals on backdrop click
+document.getElementById('pwd-modal').addEventListener('click', e => {
+  if (e.target === document.getElementById('pwd-modal')) closePwdModal();
+});
+
+document.getElementById('del-modal').addEventListener('click', e => {
+  if (e.target === document.getElementById('del-modal')) closeDelModal();
+});
 
 // ══════════════════════════════════════════
 // VIEW ROUTING
@@ -359,27 +182,19 @@ function applyMode() {
 function showView(name) {
   if (name === 'write' && !isOwner) { openPwdModal(); return; }
 
-  // When owner navigates away from a post, clear viewer mode and hash
-  if (isViewerMode && isOwner) {
-    isViewerMode = false;
-    applyMode();
-  }
-
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.nav-pill').forEach(p => p.classList.remove('active'));
 
-  const viewEl = document.getElementById('view-' + name);
-  if (viewEl) viewEl.classList.add('active');
+  document.getElementById('view-' + name).classList.add('active');
 
   const navEl = document.getElementById('nav-' + name);
   if (navEl) navEl.classList.add('active');
 
-  // Always wipe the #post/... hash when leaving the post view
   if (name !== 'post') history.pushState('', document.title, window.location.pathname);
 
-  if (name === 'home')               renderHome();
+  if (name === 'home')  renderHome();
   if (name === 'write' && !editingId) resetEditor();
-  if (name === 'about')              renderAbout();
+  if (name === 'about') renderAbout();
 
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -396,9 +211,10 @@ function renderHome() {
     ? posts.filter(p => p.status === 'draft').sort((a, b) => b.createdAt - a.createdAt)
     : [];
 
+  // Update stats
   const totalWords = posts.reduce((acc, p) => acc + wordCount(p.content), 0);
-
-  document.getElementById('stats-row').innerHTML = `
+  const statsRow = document.getElementById('stats-row');
+  statsRow.innerHTML = `
     <div class="stat-box">
       <div class="stat-num">${published.length}</div>
       <div class="stat-label">Posts</div>
@@ -410,7 +226,8 @@ function renderHome() {
     <div class="stat-box">
       <div class="stat-num">${(totalWords / 1000).toFixed(1)}k</div>
       <div class="stat-label">Words</div>
-    </div>`;
+    </div>
+  `;
 
   document.getElementById('post-count-badge').textContent =
     `${published.length} post${published.length !== 1 ? 's' : ''}`;
@@ -423,11 +240,7 @@ function renderHome() {
         <div class="empty-glyph">◌</div>
         <div class="empty-title">Nothing here yet.</div>
         <div class="empty-sub">Hit "Write" to publish your first idea.</div>
-        ${isOwner
-          ? `<button class="btn-primary" onclick="showView('write')"
-               style="width:auto;display:inline-flex;gap:0.4rem;padding:0.75rem 1.5rem;">
-               ⚡ Write Now</button>`
-          : ''}
+        ${isOwner ? `<button class="btn-primary" onclick="showView('write')" style="width:auto;display:inline-flex;gap:0.4rem;padding:0.75rem 1.5rem;">⚡ Write Now</button>` : ''}
       </div>`;
     return;
   }
@@ -435,16 +248,19 @@ function renderHome() {
   let html = '';
 
   if (published.length) {
+    // Featured card (first post)
     const f = published[0];
     html += `
       <div class="featured-card" onclick="openPost('${f.id}')">
         <div class="featured-content">
           <div class="featured-badge">★ Featured</div>
-          <div class="card-tags">${tagChips(f.tags)}</div>
+          <div class="card-tags">${renderTags(f.tags, 'default')}</div>
           <div class="featured-title">${esc(f.title)}</div>
           <div class="featured-excerpt">${esc(f.excerpt || stripMd(f.content).slice(0, 200))}</div>
           <div class="featured-meta">
-            ${fmtDate(f.createdAt)}<span>·</span>${readTime(f.content)} min read
+            ${fmtDate(f.createdAt)}
+            <span>·</span>
+            ${readTime(f.content)} min read
           </div>
         </div>
         <div class="featured-cover">
@@ -454,6 +270,7 @@ function renderHome() {
         </div>
       </div>`;
 
+    // Remaining posts grid
     if (published.length > 1) {
       html += `<div class="post-grid">`;
       published.slice(1).forEach(p => {
@@ -465,7 +282,7 @@ function renderHome() {
                 : `<span class="post-card-placeholder">${(p.title[0] || '◌').toUpperCase()}</span>`}
             </div>
             <div class="post-card-body">
-              <div class="card-tags" style="margin-bottom:0.6rem;">${tagChips(p.tags, 2)}</div>
+              <div class="card-tags" style="margin-bottom:0.6rem;">${renderTags(p.tags, 'small')}</div>
               <div class="post-card-title">${esc(p.title)}</div>
               <div class="post-card-meta">${fmtDate(p.createdAt)} · ${readTime(p.content)} min</div>
             </div>
@@ -475,8 +292,11 @@ function renderHome() {
     }
   }
 
+  // Drafts section (owner only)
   if (drafts.length) {
-    html += `<div class="drafts-section"><div class="drafts-heading">Drafts</div>`;
+    html += `
+      <div class="drafts-section">
+        <div class="drafts-heading">Drafts</div>`;
     drafts.forEach(d => {
       html += `
         <div class="draft-card" onclick="editPost('${d.id}')">
@@ -495,53 +315,24 @@ function renderHome() {
 }
 
 // ══════════════════════════════════════════
-// OPEN POST — fetches fresh from Supabase
+// OPEN POST (single post view)
 // ══════════════════════════════════════════
-async function openPost(id) {
-  showLoading(true);
+function openPost(id) {
+  const post = posts.find(p => p.id === id);
+  if (!post) { toast('Post not found.', 'error'); return; }
 
-  // Always fetch from DB so viewers get the live content.
-  // No status filter here — RLS handles access; JS blocks drafts for non-owners.
-  const { data: row, error } = await db
-    .from('posts')
-    .select('*')
-    .eq('id', id)
-    .maybeSingle();
+  // Set share hash in URL
+  window.location.hash = `#post/${id}`;
 
-  showLoading(false);
-
-  if (error) {
-    console.error('[openPost] DB error:', error);
-    showPostError(`Database error: ${error.message}`);
-    return;
-  }
-
-  if (!row) {
-    console.warn('[openPost] No post found for id:', id);
-    showPostError(null);
-    return;
-  }
-
-  // Block viewers from reading drafts
-  if (row.status !== 'published' && !isOwner) {
-    showPostError(null);
-    return;
-  }
-
-  const post     = rowToPost(row);
   const shareUrl = `${window.location.origin}${window.location.pathname}#post/${id}`;
 
-  // Write hash only for owner (creates the shareable URL).
-  // Viewers already have the hash from the link they opened.
-  if (isOwner) window.location.hash = `#post/${id}`;
-
-  const viewerBanner  = isViewerMode
-    ? `<div class="viewer-notice">👁 View-only — shared post link</div>` : '';
+  const viewerNotice = isViewerMode
+    ? `<div class="viewer-notice">👁 View-only — shared post link</div>`
+    : '';
 
   const ownerControls = isOwner ? `
     <div class="pv-action-group">
-      <button class="btn-outline" onclick="editPost('${post.id}')"
-        style="width:auto;margin:0;padding:0.5rem 0.9rem;font-size:0.62rem;">✏️ Edit</button>
+      <button class="btn-outline" onclick="editPost('${post.id}')" style="width:auto;margin:0;padding:0.5rem 0.9rem;font-size:0.62rem;">✏️ Edit</button>
       <button class="btn-danger" onclick="askDelete('${post.id}')">🗑 Delete</button>
     </div>` : '';
 
@@ -553,11 +344,9 @@ async function openPost(id) {
     </div>` : '';
 
   document.getElementById('pv-content').innerHTML = `
-    ${!isViewerMode
-      ? `<button class="pv-back" onclick="showView('home')">← Back to feed</button>`
-      : '<div style="height:1rem;"></div>'}
-    ${viewerBanner}
-    <div class="pv-tags">${tagChips(post.tags)}</div>
+    ${!isViewerMode ? `<button class="pv-back" onclick="showView('home')">← Back to feed</button>` : '<div style="height:1rem;"></div>'}
+    ${viewerNotice}
+    <div class="pv-tags">${renderTags(post.tags, 'default')}</div>
     <h1 class="pv-title">${esc(post.title)}</h1>
     ${post.excerpt ? `<p class="pv-subtitle">${esc(post.excerpt)}</p>` : ''}
     <div class="pv-meta">
@@ -567,7 +356,7 @@ async function openPost(id) {
       <span>·</span>
       <span>${wordCount(post.content)} words</span>
     </div>
-    ${post.cover ? `<img class="pv-hero" src="${post.cover}" alt="Cover">` : ''}
+    ${post.cover ? `<img class="pv-hero" src="${post.cover}" alt="Cover image">` : ''}
     <div class="pv-body">${renderMarkdown(post.content)}</div>
     <div class="pv-actions">
       ${!isViewerMode
@@ -575,7 +364,8 @@ async function openPost(id) {
         : '<div></div>'}
       ${ownerControls}
     </div>
-    ${shareBlock}`;
+    ${shareBlock}
+  `;
 
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.nav-pill').forEach(p => p.classList.remove('active'));
@@ -583,36 +373,10 @@ async function openPost(id) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-// Clean "not found" state inside the post view
-function showPostError(debugMsg) {
-  const detail = debugMsg
-    ? `<div style="font-family:'Space Mono',monospace;font-size:0.65rem;color:var(--pink);
-         margin-top:1rem;padding:0.75rem 1rem;background:var(--pink-dim);
-         border:1px solid rgba(255,45,120,0.2);border-radius:8px;text-align:left;">
-         ${esc(debugMsg)}</div>`
-    : `<p style="font-size:0.85rem;color:var(--muted);margin-top:0.5rem;">
-         This post may have been removed or the link has expired.</p>`;
-
-  document.getElementById('pv-content').innerHTML = `
-    <div style="text-align:center;padding:6rem 2rem;">
-      <div style="font-size:3rem;opacity:0.2;margin-bottom:1rem;">◌</div>
-      <div style="font-family:'Syne',sans-serif;font-size:1.5rem;font-weight:800;
-           color:var(--muted2);">Post not found.</div>
-      ${detail}
-      ${!isViewerMode
-        ? `<button class="pv-back" onclick="showView('home')"
-             style="margin-top:2rem;">← Back to feed</button>`
-        : ''}
-    </div>`;
-
-  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-  document.getElementById('view-post').classList.add('active');
-}
-
 function copyLink(url) {
   navigator.clipboard.writeText(url)
-    .then(()  => toast('Link copied! 🔗', 'success'))
-    .catch(() => toast('Copy failed — paste it manually.', 'error'));
+    .then(() => toast('Link copied! 🔗', 'success'))
+    .catch(() => toast('Could not copy — copy it manually.', 'error'));
 }
 
 // ══════════════════════════════════════════
@@ -625,16 +389,18 @@ function editPost(id) {
 
   editingId = id;
   resetEditor();
-  document.getElementById('post-title').value          = p.title   || '';
-  document.getElementById('post-excerpt').value        = p.excerpt || '';
-  document.getElementById('post-content').value        = p.content || '';
+
+  document.getElementById('post-title').value   = p.title   || '';
+  document.getElementById('post-excerpt').value = p.excerpt || '';
+  document.getElementById('post-content').value = p.content || '';
   document.getElementById('write-heading').textContent = 'Edit Post';
+
   tags = [...(p.tags || [])];
   renderTagsUI();
 
   if (p.cover) {
     coverData = p.cover;
-    document.getElementById('cover-preview').src                = p.cover;
+    document.getElementById('cover-preview').src              = p.cover;
     document.getElementById('cover-preview-wrap').style.display = 'block';
     document.getElementById('cover-inner').style.display        = 'none';
   }
@@ -643,58 +409,52 @@ function editPost(id) {
   showView('write');
 }
 
-async function publishPost() {
+function publishPost() {
   const title   = document.getElementById('post-title').value.trim();
   const content = document.getElementById('post-content').value.trim();
   if (!title)   { toast('Add a title first.', 'error'); return; }
   if (!content) { toast('Write some content first.', 'error'); return; }
-  await savePost('published');
+  savePost('published');
 }
 
-async function saveDraft() { await savePost('draft'); }
+function saveDraft() {
+  savePost('draft');
+}
 
-async function savePost(status) {
+function savePost(status) {
   const title   = document.getElementById('post-title').value.trim()   || 'Untitled';
   const excerpt = document.getElementById('post-excerpt').value.trim();
   const content = document.getElementById('post-content').value.trim();
 
-  // If a new image was selected (base64), upload it to Supabase Storage first
-  let coverUrl = coverData;
-  if (coverData && coverData.startsWith('data:')) {
-    try {
-      const path = editingId ? `covers/${editingId}` : `covers/new-${Date.now()}`;
-      coverUrl   = await uploadImage(coverData, path);
-    } catch (e) {
-      console.error('[savePost] image upload failed:', e);
-      toast('Image upload failed — saving without cover.', 'error');
-      coverUrl = null;
+  if (editingId) {
+    const idx = posts.findIndex(p => p.id === editingId);
+    if (idx !== -1) {
+      posts[idx] = {
+        ...posts[idx],
+        title, excerpt, content,
+        tags: [...tags],
+        cover: coverData,
+        status,
+        updatedAt: Date.now()
+      };
     }
-  }
-
-  const payload = { title, excerpt, content, tags: [...tags], cover: coverUrl, status };
-
-  try {
-    showLoading(true);
-    const saved = await dbSavePost(payload, editingId || null);
-
-    // Update local cache so the UI reflects changes immediately
-    if (editingId) {
-      const idx = posts.findIndex(p => p.id === editingId);
-      if (idx !== -1) posts[idx] = saved; else posts.unshift(saved);
-    } else {
-      posts.unshift(saved);
-    }
-
     editingId = null;
-    showLoading(false);
-    toast(status === 'published' ? '⚡ Published!' : '💾 Draft saved!', 'success');
-    resetEditor();
-    showView('home');
-  } catch (e) {
-    showLoading(false);
-    console.error('[savePost]', e);
-    toast('Save failed: ' + (e.message || e), 'error');
+  } else {
+    posts.unshift({
+      id: Date.now().toString(),
+      title, excerpt, content,
+      tags: [...tags],
+      cover: coverData,
+      status,
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    });
   }
+
+  localStorage.setItem(KEY_POSTS, JSON.stringify(posts));
+  toast(status === 'published' ? '⚡ Published!' : '💾 Draft saved!', 'success');
+  resetEditor();
+  showView('home');
 }
 
 // ══════════════════════════════════════════
@@ -710,23 +470,16 @@ function closeDelModal() {
   document.getElementById('del-modal').classList.remove('open');
 }
 
-async function confirmDelete() {
-  try {
-    showLoading(true);
-    await dbDeletePost(deleteId);
-    posts = posts.filter(p => p.id !== deleteId);
-    showLoading(false);
-    closeDelModal();
-    toast('Post deleted.', 'success');
-    showView('home');
-  } catch (e) {
-    showLoading(false);
-    toast('Delete failed: ' + (e.message || e), 'error');
-  }
+function confirmDelete() {
+  posts = posts.filter(p => p.id !== deleteId);
+  localStorage.setItem(KEY_POSTS, JSON.stringify(posts));
+  closeDelModal();
+  toast('Post deleted.', 'success');
+  showView('home');
 }
 
 // ══════════════════════════════════════════
-// COVER IMAGE (local preview before upload)
+// COVER IMAGE
 // ══════════════════════════════════════════
 function handleCover(input) {
   if (input.files && input.files[0]) readCoverFile(input.files[0]);
@@ -735,8 +488,8 @@ function handleCover(input) {
 function readCoverFile(file) {
   const reader = new FileReader();
   reader.onload = e => {
-    coverData = e.target.result;   // stored as base64 until Save
-    document.getElementById('cover-preview').src                = coverData;
+    coverData = e.target.result;
+    document.getElementById('cover-preview').src              = coverData;
     document.getElementById('cover-preview-wrap').style.display = 'block';
     document.getElementById('cover-inner').style.display        = 'none';
   };
@@ -751,14 +504,15 @@ function removeCover() {
   if (inp) inp.value = '';
 }
 
+// Drag-and-drop on cover zone
 const coverZone = document.getElementById('cover-zone');
 coverZone.addEventListener('dragover',  e => { e.preventDefault(); coverZone.classList.add('over'); });
-coverZone.addEventListener('dragleave', ()  => coverZone.classList.remove('over'));
+coverZone.addEventListener('dragleave', () => coverZone.classList.remove('over'));
 coverZone.addEventListener('drop', e => {
   e.preventDefault();
   coverZone.classList.remove('over');
-  const f = e.dataTransfer.files[0];
-  if (f && f.type.startsWith('image/')) readCoverFile(f);
+  const file = e.dataTransfer.files[0];
+  if (file && file.type.startsWith('image/')) readCoverFile(file);
 });
 
 // ══════════════════════════════════════════
@@ -770,11 +524,21 @@ document.getElementById('tag-input').addEventListener('keydown', function (e) {
     addTag(this.value.trim().replace(/,/g, ''));
     this.value = '';
   }
-  if (e.key === 'Backspace' && !this.value && tags.length) removeTag(tags[tags.length - 1]);
+  if (e.key === 'Backspace' && !this.value && tags.length) {
+    removeTag(tags[tags.length - 1]);
+  }
 });
 
-function addTag(val)    { if (!val || tags.includes(val)) return; tags.push(val); renderTagsUI(); }
-function removeTag(val) { tags = tags.filter(t => t !== val); renderTagsUI(); }
+function addTag(val) {
+  if (!val || tags.includes(val)) return;
+  tags.push(val);
+  renderTagsUI();
+}
+
+function removeTag(val) {
+  tags = tags.filter(t => t !== val);
+  renderTagsUI();
+}
 
 function renderTagsUI() {
   const wrap = document.getElementById('tags-wrap');
@@ -788,11 +552,11 @@ function renderTagsUI() {
   });
 }
 
-// Render tag chips for cards and post view
-function tagChips(arr, limit = null) {
-  if (!arr || !arr.length) return '<span class="card-tag">Essay</span>';
-  return (limit ? arr.slice(0, limit) : arr)
-    .map(t => `<span class="card-tag">${esc(t)}</span>`).join('');
+// Helper to render tag chips for post cards / post view
+function renderTags(tagArr, size = 'default') {
+  if (!tagArr || !tagArr.length) return '<span class="card-tag">Essay</span>';
+  const limit = size === 'small' ? 2 : tagArr.length;
+  return tagArr.slice(0, limit).map(t => `<span class="card-tag">${esc(t)}</span>`).join('');
 }
 
 // ══════════════════════════════════════════
@@ -808,22 +572,29 @@ function updateWordCount() {
 // ══════════════════════════════════════════
 // TOOLBAR HELPERS
 // ══════════════════════════════════════════
-function ins(b, a) {
-  const ta = document.getElementById('post-content');
-  const s  = ta.selectionStart, e = ta.selectionEnd;
-  ta.setRangeText(b + ta.value.slice(s, e) + a, s, e, 'select');
+function ins(before, after) {
+  const ta  = document.getElementById('post-content');
+  const s   = ta.selectionStart;
+  const e   = ta.selectionEnd;
+  const sel = ta.value.slice(s, e);
+  ta.setRangeText(before + sel + after, s, e, 'select');
   ta.focus();
 }
-function insLine(p) {
-  const ta = document.getElementById('post-content');
-  const ls = ta.value.lastIndexOf('\n', ta.selectionStart - 1) + 1;
-  ta.setRangeText(p, ls, ls, 'end');
+
+function insLine(prefix) {
+  const ta        = document.getElementById('post-content');
+  const s         = ta.selectionStart;
+  const lineStart = ta.value.lastIndexOf('\n', s - 1) + 1;
+  ta.setRangeText(prefix, lineStart, lineStart, 'end');
   ta.focus();
 }
-function insBlock(b, a) {
-  const ta = document.getElementById('post-content');
-  const s  = ta.selectionStart, e = ta.selectionEnd;
-  ta.setRangeText(b + ta.value.slice(s, e) + a, s, e, 'end');
+
+function insBlock(before, after) {
+  const ta  = document.getElementById('post-content');
+  const s   = ta.selectionStart;
+  const e   = ta.selectionEnd;
+  const sel = ta.value.slice(s, e);
+  ta.setRangeText(before + sel + after, s, e, 'end');
   ta.focus();
 }
 
@@ -831,12 +602,14 @@ function insBlock(b, a) {
 // RESET EDITOR
 // ══════════════════════════════════════════
 function resetEditor() {
-  document.getElementById('post-title').value          = '';
-  document.getElementById('post-excerpt').value        = '';
-  document.getElementById('post-content').value        = '';
-  document.getElementById('word-count').textContent    = '0 words';
+  document.getElementById('post-title').value   = '';
+  document.getElementById('post-excerpt').value = '';
+  document.getElementById('post-content').value = '';
+  document.getElementById('word-count').textContent = '0 words';
   document.getElementById('write-heading').textContent = 'New Post';
-  tags = []; coverData = null; editingId = null;
+  tags      = [];
+  coverData = null;
+  editingId = null;
   renderTagsUI();
   removeCover();
 }
@@ -850,15 +623,14 @@ function renderAbout() {
   document.getElementById('abt-bio').textContent    = about.bio    || '';
 
   const av = document.getElementById('av-display');
-  if (av) av.innerHTML = about.avatar
+  av.innerHTML = about.avatar
     ? `<img src="${about.avatar}" alt="Avatar">`
     : (about.name || 'A')[0].toUpperCase();
 
-  const wrap = document.getElementById('about-edit-wrap');
-  if (!wrap) return;
+  const editWrap = document.getElementById('about-edit-wrap');
 
   if (isOwner && !isViewerMode) {
-    wrap.innerHTML = `
+    editWrap.innerHTML = `
       <button class="edit-toggle-btn" onclick="toggleAboutEdit()">✏️ Edit Profile</button>
       <div class="about-edit-form" id="about-edit-form" style="display:none;">
         <div class="field" style="margin-top:1.25rem;">
@@ -876,8 +648,7 @@ function renderAbout() {
         <div class="field">
           <label>Profile Photo</label>
           <div class="upload-zone" style="position:relative;">
-            <input type="file" accept="image/*" onchange="handleAvatar(this)"
-              style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;" />
+            <input type="file" accept="image/*" onchange="handleAvatar(this)" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;" />
             <div class="upload-icon">👤</div>
             <div class="upload-text">Click to upload</div>
           </div>
@@ -885,64 +656,49 @@ function renderAbout() {
         <button class="btn-primary" onclick="saveAbout()">Save Profile</button>
       </div>`;
   } else {
-    wrap.innerHTML = '';
+    editWrap.innerHTML = '';
   }
 }
 
 function updateAboutSidebar() {
-  const logo = document.getElementById('site-logo');
-  const desc = document.getElementById('home-desc');
-  if (logo) {
+  const siteLogoEl = document.getElementById('site-logo');
+  const homeDesc   = document.getElementById('home-desc');
+
+  if (siteLogoEl) {
     const name = (about.name || 'VOID').split(' ')[0].toUpperCase();
-    logo.innerHTML = `${name}<span>.</span>BLOG`;
+    siteLogoEl.innerHTML = `${name}<span>.</span>BLOG`;
   }
-  if (desc && about.bio)
-    desc.textContent = about.bio.length > 130 ? about.bio.slice(0, 130) + '...' : about.bio;
+
+  if (homeDesc && about.bio) {
+    homeDesc.textContent = about.bio.length > 130
+      ? about.bio.slice(0, 130) + '...'
+      : about.bio;
+  }
 }
 
 function toggleAboutEdit() {
-  const f = document.getElementById('about-edit-form');
-  if (f) f.style.display = f.style.display === 'none' ? 'block' : 'none';
+  const form = document.getElementById('about-edit-form');
+  if (form) form.style.display = form.style.display === 'none' ? 'block' : 'none';
 }
 
-async function saveAbout() {
-  const name   = document.getElementById('abt-name-inp').value.trim()   || 'Author';
-  const handle = document.getElementById('abt-handle-inp').value.trim() || '@void';
-  const bio    = document.getElementById('abt-bio-inp').value.trim();
-  try {
-    showLoading(true);
-    await Promise.all([
-      dbSaveSetting('about_name',   name),
-      dbSaveSetting('about_handle', handle),
-      dbSaveSetting('about_bio',    bio),
-    ]);
-    about = { ...about, name, handle, bio };
-    showLoading(false);
-    updateAboutSidebar();
-    renderAbout();
-    toast('Profile saved! ✅', 'success');
-  } catch (e) {
-    showLoading(false);
-    toast('Save failed: ' + (e.message || e), 'error');
-  }
+function saveAbout() {
+  about.name   = document.getElementById('abt-name-inp').value.trim()   || 'Author';
+  about.handle = document.getElementById('abt-handle-inp').value.trim() || '@void';
+  about.bio    = document.getElementById('abt-bio-inp').value.trim();
+  localStorage.setItem(KEY_ABOUT, JSON.stringify(about));
+  updateAboutSidebar();
+  renderAbout();
+  toast('Profile saved! ✅', 'success');
 }
 
-async function handleAvatar(input) {
+function handleAvatar(input) {
   if (!input.files[0]) return;
   const reader = new FileReader();
-  reader.onload = async e => {
-    try {
-      showLoading(true);
-      const url = await uploadImage(e.target.result, 'avatars/profile');
-      await dbSaveSetting('about_avatar', url);
-      about.avatar = url;
-      showLoading(false);
-      renderAbout();
-      toast('Photo updated! ✅', 'success');
-    } catch (err) {
-      showLoading(false);
-      toast('Upload failed: ' + (err.message || err), 'error');
-    }
+  reader.onload = e => {
+    about.avatar = e.target.result;
+    localStorage.setItem(KEY_ABOUT, JSON.stringify(about));
+    renderAbout();
+    toast('Photo updated!', 'success');
   };
   reader.readAsDataURL(input.files[0]);
 }
@@ -953,51 +709,88 @@ async function handleAvatar(input) {
 function renderMarkdown(md) {
   if (!md) return '';
   let h = esc(md);
-  h = h.replace(/```([\s\S]*?)```/g, (_, c) => `<pre><code>${c.trim()}</code></pre>`);
+
+  // Code blocks (must come first)
+  h = h.replace(/```([\s\S]*?)```/g, (_, code) => `<pre><code>${code.trim()}</code></pre>`);
+
+  // Headings
   h = h.replace(/^### (.+)$/gm, '<h3>$1</h3>');
   h = h.replace(/^## (.+)$/gm,  '<h2>$1</h2>');
   h = h.replace(/^# (.+)$/gm,   '<h2>$1</h2>');
+
+  // Blockquote
   h = h.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+
+  // Bold + italic
   h = h.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
   h = h.replace(/\*\*(.+?)\*\*/g,     '<strong>$1</strong>');
   h = h.replace(/\*(.+?)\*/g,         '<em>$1</em>');
-  h = h.replace(/`(.+?)`/g,           '<code>$1</code>');
+
+  // Inline code
+  h = h.replace(/`(.+?)`/g, '<code>$1</code>');
+
+  // Horizontal rule
   h = h.replace(/^---$/gm, '<hr>');
-  h = h.replace(/(^- .+$\n?)+/gm,     m => `<ul>${m.trim().split('\n').map(l=>`<li>${l.replace(/^- /,'')}</li>`).join('')}</ul>`);
-  h = h.replace(/(^\d+\. .+$\n?)+/gm, m => `<ol>${m.trim().split('\n').map(l=>`<li>${l.replace(/^\d+\. /,'')}</li>`).join('')}</ol>`);
-  h = h.split(/\n\n+/).map(b =>
-    /^<(h[1-6]|ul|ol|blockquote|pre|hr)/.test(b) ? b : `<p>${b.replace(/\n/g,'<br>')}</p>`
-  ).join('\n');
+
+  // Unordered lists
+  h = h.replace(/(^- .+$\n?)+/gm, match => {
+    const items = match.trim().split('\n').map(l => `<li>${l.replace(/^- /, '')}</li>`).join('');
+    return `<ul>${items}</ul>`;
+  });
+
+  // Ordered lists
+  h = h.replace(/(^\d+\. .+$\n?)+/gm, match => {
+    const items = match.trim().split('\n').map(l => `<li>${l.replace(/^\d+\. /, '')}</li>`).join('');
+    return `<ol>${items}</ol>`;
+  });
+
+  // Wrap remaining lines in paragraphs
+  h = h.split(/\n\n+/).map(block => {
+    if (/^<(h[1-6]|ul|ol|blockquote|pre|hr)/.test(block)) return block;
+    return `<p>${block.replace(/\n/g, '<br>')}</p>`;
+  }).join('\n');
+
   return h;
 }
 
 // ══════════════════════════════════════════
 // UTILITIES
 // ══════════════════════════════════════════
-function esc(s) {
-  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+function esc(str) {
+  return (str || '')
+    .replace(/&/g,  '&amp;')
+    .replace(/</g,  '&lt;')
+    .replace(/>/g,  '&gt;')
+    .replace(/"/g,  '&quot;')
+    .replace(/'/g,  '&#39;');
 }
-function stripMd(s)  { return (s||'').replace(/[#*`_~>]/g,'').replace(/\n/g,' ').trim(); }
-function wordCount(t){ return (t||'').trim().split(/\s+/).filter(Boolean).length; }
-function readTime(t) { return Math.max(1, Math.round(wordCount(t) / 200)); }
-function fmtDate(ts) {
-  return new Date(ts).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+
+function stripMd(str) {
+  return (str || '').replace(/[#*`_~>]/g, '').replace(/\n/g, ' ').trim();
 }
-function toast(msg, type = 'success') {
+
+function wordCount(text) {
+  return (text || '').trim().split(/\s+/).filter(Boolean).length;
+}
+
+function readTime(text) {
+  return Math.max(1, Math.round(wordCount(text) / 200));
+}
+
+function fmtDate(timestamp) {
+  return new Date(timestamp).toLocaleDateString('en-US', {
+    month: 'short',
+    day:   'numeric',
+    year:  'numeric'
+  });
+}
+
+function toast(message, type = 'success') {
   const el = document.getElementById('toast');
-  el.textContent = msg;
+  el.textContent = message;
   el.className   = `toast ${type} show`;
   setTimeout(() => el.classList.remove('show'), 3200);
 }
-
-// ── Modal backdrop clicks ──
-document.getElementById('pwd-modal').addEventListener('click', e => {
-  if (e.target === document.getElementById('pwd-modal')) closePwdModal();
-});
-document.getElementById('del-modal').addEventListener('click', e => {
-  if (e.target === document.getElementById('del-modal')) closeDelModal();
-});
 
 // ══════════════════════════════════════════
 // RUN
