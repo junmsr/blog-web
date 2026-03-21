@@ -27,17 +27,36 @@ function boot() {
 
   // Shared post link — viewer mode
   if (hash.startsWith('#post/')) {
-    const postId = hash.slice(6);
+    const encoded = hash.slice(6);
     isViewerMode = true;
     isOwner      = false;
     applyMode();
-    const post = posts.find(p => p.id === postId && p.status === 'published');
-    if (post) {
-      openPost(postId);
-    } else {
-      showView('home');
-      toast('Post not found or no longer available.', 'error');
+    
+    // Try to find post in localStorage first (local access)
+    const localPost = posts.find(p => p.id === encoded && p.status === 'published');
+    if (localPost) {
+      openPost(encoded);
+      return;
     }
+    
+    // Try to decode from URL (shared link from another device)
+    try {
+      const decodedPost = decodePostData(encoded);
+      if (decodedPost) {
+        // Temporarily add decoded post to display it (only if not already in posts)
+        const existingIndex = posts.findIndex(p => p.id === decodedPost.id);
+        if (existingIndex === -1) {
+          posts.push(decodedPost);
+        }
+        openPost(decodedPost.id, true); // true = isSharedLink
+        return;
+      }
+    } catch (e) {
+      console.error('Failed to decode shared post:', e);
+    }
+    
+    showView('home');
+    toast('Post not found or no longer available.', 'error');
     return;
   }
 
@@ -317,14 +336,23 @@ function renderHome() {
 // ══════════════════════════════════════════
 // OPEN POST (single post view)
 // ══════════════════════════════════════════
-function openPost(id) {
+function openPost(id, isSharedLink = false) {
   const post = posts.find(p => p.id === id);
   if (!post) { toast('Post not found.', 'error'); return; }
 
   // Set share hash in URL
   window.location.hash = `#post/${id}`;
 
-  const shareUrl = `${window.location.origin}${window.location.pathname}#post/${id}`;
+  // Generate shareable URL with encoded post data
+  let shareUrl;
+  if (isOwner && !isSharedLink) {
+    // Owner generates link with encoded data for sharing
+    const encodedData = encodePostData(post);
+    shareUrl = `${window.location.origin}${window.location.pathname}#post/${encodedData}`;
+  } else {
+    // Use original ID for local access
+    shareUrl = `${window.location.origin}${window.location.pathname}#post/${id}`;
+  }
 
   const viewerNotice = isViewerMode
     ? `<div class="viewer-notice">👁 View-only — shared post link</div>`
@@ -336,7 +364,7 @@ function openPost(id) {
       <button class="btn-danger" onclick="askDelete('${post.id}')">🗑 Delete</button>
     </div>` : '';
 
-  const shareBlock = isOwner ? `
+  const shareBlock = isOwner && !isSharedLink ? `
     <div class="share-box">
       <span class="share-label">Share</span>
       <span class="share-url">${shareUrl}</span>
@@ -751,6 +779,37 @@ function renderMarkdown(md) {
   }).join('\n');
 
   return h;
+}
+
+// ══════════════════════════════════════════
+// POST DATA ENCODING (for shareable links)
+// ══════════════════════════════════════════
+function encodePostData(post) {
+  try {
+    // Compress post data to base64
+    const json = JSON.stringify(post);
+    return btoa(json); // Base64 encode
+  } catch (e) {
+    console.error('Encoding failed:', e);
+    return post.id; // Fallback to ID only
+  }
+}
+
+function decodePostData(encoded) {
+  try {
+    // If it looks like a base64-encoded post (longer than typical ID)
+    if (encoded.length > 20) {
+      const json = atob(encoded); // Base64 decode
+      const post = JSON.parse(json);
+      // Validate it has required fields
+      if (post.title && post.content && post.id) {
+        return post;
+      }
+    }
+  } catch (e) {
+    console.error('Decoding failed:', e);
+  }
+  return null;
 }
 
 // ══════════════════════════════════════════
