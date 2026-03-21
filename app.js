@@ -345,10 +345,12 @@ function openPost(id, isSharedLink = false) {
   window.location.hash = `#post/${activeHash}`;
 
   // Generate shareable URL with encoded post data
+  const shortUrl = `${window.location.origin}${window.location.pathname}#post/${post.id}`;
+  const longUrl  = `${window.location.origin}${window.location.pathname}#post/${encodePostData(post)}`;
+
   let shareUrl;
   if (isOwner && !isSharedLink) {
-    const encodedData = encodePostData(post);
-    shareUrl = `${window.location.origin}${window.location.pathname}#post/${encodedData}`;
+    shareUrl = longUrl;
   } else {
     shareUrl = `${window.location.origin}${window.location.pathname}#post/${activeHash}`;
   }
@@ -365,9 +367,12 @@ function openPost(id, isSharedLink = false) {
 
   const shareBlock = isOwner && !isSharedLink ? `
     <div class="share-box">
-      <span class="share-label">Share</span>
-      <span class="share-url">${shareUrl}</span>
-      <button class="copy-btn" onclick="copyLink('${shareUrl}')">Copy Link</button>
+      <span class="share-label">Cross-device link (compressed)</span>
+      <span class="share-url">${longUrl}</span>
+      <button class="copy-btn" onclick="copyLink('${longUrl}')">Copy Cross-device Link</button>
+      <div style="margin-top:.75rem; font-size:.78rem; color:#a7f2ff">Short link for same host (local only):</div>
+      <span class="share-url">${shortUrl}</span>
+      <button class="copy-btn" onclick="copyLink('${shortUrl}')">Copy Short Link</button>
     </div>` : '';
 
   document.getElementById('pv-content').innerHTML = `
@@ -783,29 +788,392 @@ function renderMarkdown(md) {
 // ══════════════════════════════════════════
 // POST DATA ENCODING (for shareable links)
 // ══════════════════════════════════════════
+// simple LZ-string (URL safe) helper; inlined to avoid external dependency
+const LZString = {
+  keyStrUriSafe: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-$",
+
+  compressToEncodedURIComponent: function (input) {
+    if (input == null) return "";
+    return this._compress(input, 6, function (a) {
+      return LZString.keyStrUriSafe.charAt(a);
+    });
+  },
+
+  decompressFromEncodedURIComponent: function (input) {
+    if (input == null) return "";
+    if (input == "") return null;
+    input = input.replace(/ /g, "+");
+    return this._decompress(input.length, 32, function (index) {
+      return LZString.keyStrUriSafe.indexOf(input.charAt(index));
+    });
+  },
+
+  _compress: function (uncompressed, bitsPerChar, getCharFromInt) {
+    if (uncompressed == null) return "";
+    let i, value,
+      context_dictionary = {},
+      context_dictionaryToCreate = {},
+      context_c = "",
+      context_wc = "",
+      context_w = "",
+      context_enlargeIn = 2,
+      context_dictSize = 3,
+      context_numBits = 2,
+      context_data = [],
+      context_data_val = 0,
+      context_data_position = 0;
+    for (i = 0; i < uncompressed.length; i += 1) {
+      context_c = uncompressed.charAt(i);
+      if (!Object.prototype.hasOwnProperty.call(context_dictionary, context_c)) {
+        context_dictionary[context_c] = context_dictSize++;
+        context_dictionaryToCreate[context_c] = true;
+      }
+      context_wc = context_w + context_c;
+      if (Object.prototype.hasOwnProperty.call(context_dictionary, context_wc)) {
+        context_w = context_wc;
+      } else {
+        if (Object.prototype.hasOwnProperty.call(context_dictionaryToCreate, context_w)) {
+          if (context_w.charCodeAt(0) < 256) {
+            for (i = 0; i < context_numBits; i += 1) {
+              context_data_val = (context_data_val << 1);
+              if (context_data_position == bitsPerChar - 1) {
+                context_data_position = 0;
+                context_data.push(getCharFromInt(context_data_val));
+                context_data_val = 0;
+              } else {
+                context_data_position++;
+              }
+            }
+            value = context_w.charCodeAt(0);
+            for (i = 0; i < 8; i += 1) {
+              context_data_val = (context_data_val << 1) | (value & 1);
+              if (context_data_position == bitsPerChar - 1) {
+                context_data_position = 0;
+                context_data.push(getCharFromInt(context_data_val));
+                context_data_val = 0;
+              } else {
+                context_data_position++;
+              }
+              value = value >> 1;
+            }
+          } else {
+            value = 1;
+            for (i = 0; i < context_numBits; i += 1) {
+              context_data_val = (context_data_val << 1) | value;
+              if (context_data_position == bitsPerChar - 1) {
+                context_data_position = 0;
+                context_data.push(getCharFromInt(context_data_val));
+                context_data_val = 0;
+              } else {
+                context_data_position++;
+              }
+              value = 0;
+            }
+            value = context_w.charCodeAt(0);
+            for (i = 0; i < 16; i += 1) {
+              context_data_val = (context_data_val << 1) | (value & 1);
+              if (context_data_position == bitsPerChar - 1) {
+                context_data_position = 0;
+                context_data.push(getCharFromInt(context_data_val));
+                context_data_val = 0;
+              } else {
+                context_data_position++;
+              }
+              value = value >> 1;
+            }
+          }
+          context_enlargeIn--;
+          if (context_enlargeIn == 0) {
+            context_enlargeIn = Math.pow(2, context_numBits);
+            context_numBits++;
+          }
+          delete context_dictionaryToCreate[context_w];
+        } else {
+          value = context_dictionary[context_w];
+          for (i = 0; i < context_numBits; i += 1) {
+            context_data_val = (context_data_val << 1) | (value & 1);
+            if (context_data_position == bitsPerChar - 1) {
+              context_data_position = 0;
+              context_data.push(getCharFromInt(context_data_val));
+              context_data_val = 0;
+            } else {
+              context_data_position++;
+            }
+            value = value >> 1;
+          }
+        }
+        context_enlargeIn--;
+        if (context_enlargeIn == 0) {
+          context_enlargeIn = Math.pow(2, context_numBits);
+          context_numBits++;
+        }
+        context_dictionary[context_wc] = context_dictSize++;
+        context_w = String(context_c);
+      }
+    }
+    if (context_w !== "") {
+      if (Object.prototype.hasOwnProperty.call(context_dictionaryToCreate, context_w)) {
+        if (context_w.charCodeAt(0) < 256) {
+          for (i = 0; i < context_numBits; i += 1) {
+            context_data_val = (context_data_val << 1);
+            if (context_data_position == bitsPerChar - 1) {
+              context_data_position = 0;
+              context_data.push(getCharFromInt(context_data_val));
+              context_data_val = 0;
+            } else {
+              context_data_position++;
+            }
+          }
+          value = context_w.charCodeAt(0);
+          for (i = 0; i < 8; i += 1) {
+            context_data_val = (context_data_val << 1) | (value & 1);
+            if (context_data_position == bitsPerChar - 1) {
+              context_data_position = 0;
+              context_data.push(getCharFromInt(context_data_val));
+              context_data_val = 0;
+            } else {
+              context_data_position++;
+            }
+            value = value >> 1;
+          }
+        } else {
+          value = 1;
+          for (i = 0; i < context_numBits; i += 1) {
+            context_data_val = (context_data_val << 1) | value;
+            if (context_data_position == bitsPerChar - 1) {
+              context_data_position = 0;
+              context_data.push(getCharFromInt(context_data_val));
+              context_data_val = 0;
+            } else {
+              context_data_position++;
+            }
+            value = 0;
+          }
+          value = context_w.charCodeAt(0);
+          for (i = 0; i < 16; i += 1) {
+            context_data_val = (context_data_val << 1) | (value & 1);
+            if (context_data_position == bitsPerChar - 1) {
+              context_data_position = 0;
+              context_data.push(getCharFromInt(context_data_val));
+              context_data_val = 0;
+            } else {
+              context_data_position++;
+            }
+            value = value >> 1;
+          }
+        }
+        context_enlargeIn--;
+        if (context_enlargeIn == 0) {
+          context_enlargeIn = Math.pow(2, context_numBits);
+          context_numBits++;
+        }
+        delete context_dictionaryToCreate[context_w];
+      } else {
+        value = context_dictionary[context_w];
+        for (i = 0; i < context_numBits; i += 1) {
+          context_data_val = (context_data_val << 1) | (value & 1);
+          if (context_data_position == bitsPerChar - 1) {
+            context_data_position = 0;
+            context_data.push(getCharFromInt(context_data_val));
+            context_data_val = 0;
+          } else {
+            context_data_position++;
+          }
+          value = value >> 1;
+        }
+      }
+    }
+    value = 2;
+    for (i = 0; i < context_numBits; i += 1) {
+      context_data_val = (context_data_val << 1) | (value & 1);
+      if (context_data_position == bitsPerChar - 1) {
+        context_data_position = 0;
+        context_data.push(getCharFromInt(context_data_val));
+        context_data_val = 0;
+      } else {
+        context_data_position++;
+      }
+      value = value >> 1;
+    }
+    while (true) {
+      context_data_val = (context_data_val << 1);
+      if (context_data_position == bitsPerChar - 1) {
+        context_data.push(getCharFromInt(context_data_val));
+        break;
+      } else context_data_position++;
+    }
+    return context_data.join("");
+  },
+
+  _decompress: function (length, resetValue, getNextValue) {
+    let dictionary = [""],
+      next, enlargeIn = 4,
+      dictSize = 4,
+      numBits = 3,
+      entry = "",
+      result = [],
+      w, bits, resb, maxpower, power,
+      c, data = { val: getNextValue(0), position: resetValue, index: 1 };
+
+    for (let i = 0; i < 3; i += 1) {
+      dictionary[i] = i;
+    }
+    bits = 0;
+    maxpower = Math.pow(2, 2);
+    power = 1;
+    while (power != maxpower) {
+      resb = data.val & data.position;
+      data.position >>= 1;
+      if (data.position == 0) {
+        data.position = resetValue;
+        data.val = getNextValue(data.index++);
+      }
+      bits |= (resb > 0 ? 1 : 0) * power;
+      power *= 2;
+    }
+    switch (next = bits) {
+      case 0:
+        bits = 0;
+        maxpower = Math.pow(2, 8);
+        power = 1;
+        while (power != maxpower) {
+          resb = data.val & data.position;
+          data.position >>= 1;
+          if (data.position == 0) {
+            data.position = resetValue;
+            data.val = getNextValue(data.index++);
+          }
+          bits |= (resb > 0 ? 1 : 0) * power;
+          power *= 2;
+        }
+        c = String.fromCharCode(bits);
+        break;
+      case 1:
+        bits = 0;
+        maxpower = Math.pow(2, 16);
+        power = 1;
+        while (power != maxpower) {
+          resb = data.val & data.position;
+          data.position >>= 1;
+          if (data.position == 0) {
+            data.position = resetValue;
+            data.val = getNextValue(data.index++);
+          }
+          bits |= (resb > 0 ? 1 : 0) * power;
+          power *= 2;
+        }
+        c = String.fromCharCode(bits);
+        break;
+      case 2:
+        return "";
+    }
+    dictionary[3] = c;
+    w = c;
+    result.push(c);
+    while (true) {
+      if (data.index > length) return "";
+
+      bits = 0;
+      maxpower = Math.pow(2, numBits);
+      power = 1;
+      while (power != maxpower) {
+        resb = data.val & data.position;
+        data.position >>= 1;
+        if (data.position == 0) {
+          data.position = resetValue;
+          data.val = getNextValue(data.index++);
+        }
+        bits |= (resb > 0 ? 1 : 0) * power;
+        power *= 2;
+      }
+
+      switch (c = bits) {
+        case 0:
+          bits = 0;
+          maxpower = Math.pow(2, 8);
+          power = 1;
+          while (power != maxpower) {
+            resb = data.val & data.position;
+            data.position >>= 1;
+            if (data.position == 0) {
+              data.position = resetValue;
+              data.val = getNextValue(data.index++);
+            }
+            bits |= (resb > 0 ? 1 : 0) * power;
+            power *= 2;
+          }
+          dictionary[dictSize++] = String.fromCharCode(bits);
+          c = dictSize - 1;
+          enlargeIn--;
+          break;
+        case 1:
+          bits = 0;
+          maxpower = Math.pow(2, 16);
+          power = 1;
+          while (power != maxpower) {
+            resb = data.val & data.position;
+            data.position >>= 1;
+            if (data.position == 0) {
+              data.position = resetValue;
+              data.val = getNextValue(data.index++);
+            }
+            bits |= (resb > 0 ? 1 : 0) * power;
+            power *= 2;
+          }
+          dictionary[dictSize++] = String.fromCharCode(bits);
+          c = dictSize - 1;
+          enlargeIn--;
+          break;
+        case 2:
+          return result.join("");
+      }
+
+      if (enlargeIn == 0) {
+        enlargeIn = Math.pow(2, numBits);
+        numBits++;
+      }
+
+      if (dictionary[c]) {
+        entry = dictionary[c];
+      } else {
+        if (c === dictSize) {
+          entry = w + w.charAt(0);
+        } else {
+          return null;
+        }
+      }
+      result.push(entry);
+      dictionary[dictSize++] = w + entry.charAt(0);
+      dictSize++;
+      w = entry;
+
+      enlargeIn--;
+
+      if (enlargeIn == 0) {
+        enlargeIn = Math.pow(2, numBits);
+        numBits++;
+      }
+    }
+  }
+};
+
 function encodePostData(post) {
   try {
     const json = JSON.stringify(post);
-    // handle unicode + make URL-safe
-    const base64 = btoa(unescape(encodeURIComponent(json)));
-    return encodeURIComponent(base64);
+    return LZString.compressToEncodedURIComponent(json);
   } catch (e) {
     console.error('Encoding failed:', e);
-    return post.id; // Fallback to ID only
+    return post.id;
   }
 }
 
 function decodePostData(encoded) {
   try {
-    if (!encoded || encoded.length <= 20) return null;
-
-    const decodedUri = decodeURIComponent(encoded);
-    const json     = decodeURIComponent(escape(atob(decodedUri)));
-    const post     = JSON.parse(json);
-
-    if (post && post.title && post.content && post.id) {
-      return post;
-    }
+    if (!encoded || encoded.length <= 10) return null;
+    const json = LZString.decompressFromEncodedURIComponent(encoded);
+    if (!json) return null;
+    const post = JSON.parse(json);
+    if (post && post.title && post.content && post.id) return post;
   } catch (e) {
     console.error('Decoding failed:', e);
   }
