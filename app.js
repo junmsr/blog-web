@@ -998,9 +998,12 @@ const LZString = {
     while (context_data_val > 0) {
       context_data_val = (context_data_val << 1);
       if (context_data_position == bitsPerChar - 1) {
+        context_data_position = 0;
         context_data.push(getCharFromInt(context_data_val));
-        break;
-      } else context_data_position++;
+        context_data_val = 0;
+      } else {
+        context_data_position++;
+      }
     }
     return context_data.join("");
   },
@@ -1160,7 +1163,7 @@ const LZString = {
 function encodePostData(post) {
   try {
     const json = JSON.stringify(post);
-    return encodeURIComponent(btoa(json));
+    return encodeURIComponent(LZString.compressToEncodedURIComponent(json));
   } catch (e) {
     console.error('Encoding failed:', e);
     return post.id;
@@ -1171,7 +1174,8 @@ function decodePostData(encoded) {
   try {
     if (!encoded || encoded.length <= 10) return null;
     const decodedUri = decodeURIComponent(encoded);
-    const json = atob(decodedUri);
+    const json = LZString.decompressFromEncodedURIComponent(decodedUri);
+    if (!json) return null;
     const post = JSON.parse(json);
     if (post && post.title && post.content && post.id) return post;
   } catch (e) {
