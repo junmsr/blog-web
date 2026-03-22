@@ -1163,7 +1163,7 @@ const LZString = {
 function encodePostData(post) {
   try {
     const json = JSON.stringify(post);
-    return encodeURIComponent(LZString.compressToEncodedURIComponent(json));
+    return encodeURIComponent(btoa(json));
   } catch (e) {
     console.error('Encoding failed:', e);
     return post.id;
@@ -1174,8 +1174,7 @@ function decodePostData(encoded) {
   try {
     if (!encoded || encoded.length <= 10) return null;
     const decodedUri = decodeURIComponent(encoded);
-    const json = LZString.decompressFromEncodedURIComponent(decodedUri);
-    if (!json) return null;
+    const json = atob(decodedUri);
     const post = JSON.parse(json);
     if (post && post.title && post.content && post.id) return post;
   } catch (e) {
