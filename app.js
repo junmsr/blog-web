@@ -995,7 +995,7 @@ const LZString = {
       }
       value = value >> 1;
     }
-    while (true) {
+    while (context_data_val > 0) {
       context_data_val = (context_data_val << 1);
       if (context_data_position == bitsPerChar - 1) {
         context_data.push(getCharFromInt(context_data_val));
@@ -1160,7 +1160,7 @@ const LZString = {
 function encodePostData(post) {
   try {
     const json = JSON.stringify(post);
-    return LZString.compressToEncodedURIComponent(json);
+    return btoa(json);
   } catch (e) {
     console.error('Encoding failed:', e);
     return post.id;
@@ -1170,8 +1170,7 @@ function encodePostData(post) {
 function decodePostData(encoded) {
   try {
     if (!encoded || encoded.length <= 10) return null;
-    const json = LZString.decompressFromEncodedURIComponent(encoded);
-    if (!json) return null;
+    const json = atob(encoded);
     const post = JSON.parse(json);
     if (post && post.title && post.content && post.id) return post;
   } catch (e) {
