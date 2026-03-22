@@ -1160,7 +1160,7 @@ const LZString = {
 function encodePostData(post) {
   try {
     const json = JSON.stringify(post);
-    return btoa(json);
+    return encodeURIComponent(btoa(json));
   } catch (e) {
     console.error('Encoding failed:', e);
     return post.id;
@@ -1170,7 +1170,8 @@ function encodePostData(post) {
 function decodePostData(encoded) {
   try {
     if (!encoded || encoded.length <= 10) return null;
-    const json = atob(encoded);
+    const decodedUri = decodeURIComponent(encoded);
+    const json = atob(decodedUri);
     const post = JSON.parse(json);
     if (post && post.title && post.content && post.id) return post;
   } catch (e) {
