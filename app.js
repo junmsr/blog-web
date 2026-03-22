@@ -1162,7 +1162,10 @@ const LZString = {
 
 function encodePostData(post) {
   try {
-    const json = JSON.stringify(post);
+    // Exclude cover image to keep URL shorter
+    const sharedPost = { ...post };
+    delete sharedPost.cover;
+    const json = JSON.stringify(sharedPost);
     return encodeURIComponent(btoa(json));
   } catch (e) {
     console.error('Encoding failed:', e);
