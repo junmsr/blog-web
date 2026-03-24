@@ -1181,6 +1181,7 @@ function decodePostData(encoded) {
     const post = JSON.parse(json);
     if (post && post.title && post.content && post.id) return post;
   } catch (e) {
+    console.log("Failed Payload String:", encoded);
     console.error('Decoding failed:', e);
   }
   return null;
