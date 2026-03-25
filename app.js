@@ -1,17 +1,22 @@
 /* ══════════════════════════════════════════
-   VOID.BLOG — app.js
+   VOID.BLOG — app.js (Supabase Global Edition)
    ══════════════════════════════════════════ */
 
-// ── STORAGE KEYS ──────────────────────────
+// ── SUPABASE CONFIG ───────────────────────
+// We now use the globally available 'supabase' object from the HTML script tag
+const supabaseUrl = 'https://qgdkiyboxwcqvrvzvnxu.supabase.co';
+const supabaseKey = 'sb_publishable_HCcs7cVOPcNV2tnxf8PQTQ_2_o3Ru6e';
+const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
+
+// ── STORAGE KEYS (Local overrides) ────────
 const KEY_PWD   = 'vb_owner_pwd';
-const KEY_POSTS = 'vb_posts';
-const KEY_ABOUT = 'vb_about';
+const KEY_ABOUT = 'vb_about'; 
 const KEY_AUTH  = 'vb_authed';
 
 // ── STATE ─────────────────────────────────
 let isOwner      = false;
 let isViewerMode = false;
-let posts        = JSON.parse(localStorage.getItem(KEY_POSTS) || '[]');
+let posts        = []; 
 let about        = JSON.parse(localStorage.getItem(KEY_ABOUT) || '{"name":"Author","handle":"@void","bio":"Welcome to my blog. This is where I share ideas, stories, and experiments."}');
 let tags         = [];
 let coverData    = null;
@@ -22,45 +27,9 @@ let isSetupMode  = false;
 // ══════════════════════════════════════════
 // BOOT
 // ══════════════════════════════════════════
-function boot() {
+async function boot() {
   const hash = window.location.hash;
 
-  // Shared post link — viewer mode
-  if (hash.startsWith('#post/')) {
-    const encoded = hash.slice(6);
-    isViewerMode = true;
-    isOwner      = false;
-    applyMode();
-    
-    // Try to find post in localStorage first (local access)
-    const localPost = posts.find(p => p.id === encoded && p.status === 'published');
-    if (localPost) {
-      openPost(encoded);
-      return;
-    }
-    
-    // Try to decode from URL (shared link from another device)
-    try {
-      const decodedPost = decodePostData(encoded);
-      if (decodedPost) {
-        // Temporarily add decoded post to display it (only if not already in posts)
-        const existingIndex = posts.findIndex(p => p.id === decodedPost.id);
-        if (existingIndex === -1) {
-          posts.push(decodedPost);
-        }
-        openPost(decodedPost.id, true); // true = isSharedLink
-        return;
-      }
-    } catch (e) {
-      console.error('Failed to decode shared post:', e);
-    }
-    
-    showView('home');
-    toast('Post not found or no longer available.', 'error');
-    return;
-  }
-
-  // Normal load — restore session auth
   if (sessionStorage.getItem(KEY_AUTH) === '1') {
     isOwner = true;
   }
@@ -68,9 +37,41 @@ function boot() {
 
   const hasPwd = localStorage.getItem(KEY_PWD);
   if (!hasPwd) {
-    showSetupModal();       // first launch: create password
-  } else if (!isOwner) {
-    openPwdModal();         // returning visitor: prompt login
+    showSetupModal();
+  } else if (!isOwner && !hash.startsWith('#post/')) {
+    openPwdModal();
+  }
+
+  // ── FETCH POSTS FROM SUPABASE ──
+  try {
+    const { data: dbPosts, error } = await supabaseClient
+      .from('posts')
+      .select('*')
+      .order('createdAt', { ascending: false });
+
+    if (error) throw error;
+    posts = dbPosts || [];
+  } catch (err) {
+    console.error('Failed to fetch posts:', err);
+    toast('Database connection failed.', 'error');
+  }
+
+  if (hash.startsWith('#post/')) {
+    const postId = hash.slice(6);
+    isViewerMode = true;
+    isOwner      = false;
+    applyMode();
+    
+    const activePost = posts.find(p => p.id === postId && p.status === 'published');
+    
+    if (activePost) {
+      openPost(postId);
+      return;
+    } else {
+      showView('home');
+      toast('Post not found or no longer available.', 'error');
+      return;
+    }
   }
 
   renderHome();
@@ -89,24 +90,24 @@ function applyMode() {
   const navAbout    = document.getElementById('nav-about');
 
   if (isViewerMode) {
-    viewBanner.classList.add('visible');
-    ownerBadge.style.display  = 'none';
-    navWrite.style.display    = 'none';
-    logoutBtn.style.display   = 'none';
-    loginSmall.style.display  = 'none';
-    navAbout.style.display    = 'none';
+    if(viewBanner) viewBanner.classList.add('visible');
+    if(ownerBadge) ownerBadge.style.display  = 'none';
+    if(navWrite) navWrite.style.display    = 'none';
+    if(logoutBtn) logoutBtn.style.display   = 'none';
+    if(loginSmall) loginSmall.style.display  = 'none';
+    if(navAbout) navAbout.style.display    = 'none';
   } else if (isOwner) {
-    viewBanner.classList.remove('visible');
-    ownerBadge.style.display  = 'inline-flex';
-    navWrite.style.display    = 'inline-flex';
-    logoutBtn.style.display   = 'inline-flex';
-    loginSmall.style.display  = 'none';
+    if(viewBanner) viewBanner.classList.remove('visible');
+    if(ownerBadge) ownerBadge.style.display  = 'inline-flex';
+    if(navWrite) navWrite.style.display    = 'inline-flex';
+    if(logoutBtn) logoutBtn.style.display   = 'inline-flex';
+    if(loginSmall) loginSmall.style.display  = 'none';
   } else {
-    viewBanner.classList.remove('visible');
-    ownerBadge.style.display  = 'none';
-    navWrite.style.display    = 'none';
-    logoutBtn.style.display   = 'none';
-    loginSmall.style.display  = 'inline-flex';
+    if(viewBanner) viewBanner.classList.remove('visible');
+    if(ownerBadge) ownerBadge.style.display  = 'none';
+    if(navWrite) navWrite.style.display    = 'none';
+    if(logoutBtn) logoutBtn.style.display   = 'none';
+    if(loginSmall) loginSmall.style.display  = 'inline-flex';
   }
 }
 
@@ -125,8 +126,9 @@ function logout() {
 function showSetupModal() {
   isSetupMode = true;
   const m = document.getElementById('pwd-modal');
+  if(!m) return;
   document.getElementById('pwd-modal-title').textContent   = '🛠 Set Owner Password';
-  document.getElementById('pwd-modal-desc').textContent    = 'Create a password to protect owner access. Readers who open a shared post link get view-only access automatically.';
+  document.getElementById('pwd-modal-desc').textContent    = 'Create a password to protect owner access.';
   document.getElementById('pwd-cancel-btn').style.display  = 'none';
   document.getElementById('pwd-error').style.display       = 'none';
   m.classList.add('open');
@@ -135,6 +137,7 @@ function showSetupModal() {
 function openPwdModal() {
   isSetupMode = false;
   const m = document.getElementById('pwd-modal');
+  if(!m) return;
   document.getElementById('pwd-modal-title').textContent   = '🔐 Owner Access';
   document.getElementById('pwd-modal-desc').textContent    = 'Enter your password to unlock write & manage capabilities.';
   document.getElementById('pwd-cancel-btn').style.display  = 'inline-flex';
@@ -160,7 +163,6 @@ function tryLogin() {
   }
 
   if (isSetupMode) {
-    // Save new password (base64 encoded — lightweight obfuscation)
     localStorage.setItem(KEY_PWD, btoa(val));
     isOwner = true;
     sessionStorage.setItem(KEY_AUTH, '1');
@@ -186,12 +188,11 @@ function tryLogin() {
   }
 }
 
-// Close modals on backdrop click
-document.getElementById('pwd-modal').addEventListener('click', e => {
+document.getElementById('pwd-modal')?.addEventListener('click', e => {
   if (e.target === document.getElementById('pwd-modal')) closePwdModal();
 });
 
-document.getElementById('del-modal').addEventListener('click', e => {
+document.getElementById('del-modal')?.addEventListener('click', e => {
   if (e.target === document.getElementById('del-modal')) closeDelModal();
 });
 
@@ -204,7 +205,8 @@ function showView(name) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.nav-pill').forEach(p => p.classList.remove('active'));
 
-  document.getElementById('view-' + name).classList.add('active');
+  const viewEl = document.getElementById('view-' + name);
+  if(viewEl) viewEl.classList.add('active');
 
   const navEl = document.getElementById('nav-' + name);
   if (navEl) navEl.classList.add('active');
@@ -230,28 +232,30 @@ function renderHome() {
     ? posts.filter(p => p.status === 'draft').sort((a, b) => b.createdAt - a.createdAt)
     : [];
 
-  // Update stats
   const totalWords = posts.reduce((acc, p) => acc + wordCount(p.content), 0);
   const statsRow = document.getElementById('stats-row');
-  statsRow.innerHTML = `
-    <div class="stat-box">
-      <div class="stat-num">${published.length}</div>
-      <div class="stat-label">Posts</div>
-    </div>
-    ${isOwner ? `<div class="stat-box">
-      <div class="stat-num">${drafts.length}</div>
-      <div class="stat-label">Drafts</div>
-    </div>` : ''}
-    <div class="stat-box">
-      <div class="stat-num">${(totalWords / 1000).toFixed(1)}k</div>
-      <div class="stat-label">Words</div>
-    </div>
-  `;
+  if(statsRow) {
+    statsRow.innerHTML = `
+      <div class="stat-box">
+        <div class="stat-num">${published.length}</div>
+        <div class="stat-label">Posts</div>
+      </div>
+      ${isOwner ? `<div class="stat-box">
+        <div class="stat-num">${drafts.length}</div>
+        <div class="stat-label">Drafts</div>
+      </div>` : ''}
+      <div class="stat-box">
+        <div class="stat-num">${(totalWords / 1000).toFixed(1)}k</div>
+        <div class="stat-label">Words</div>
+      </div>
+    `;
+  }
 
-  document.getElementById('post-count-badge').textContent =
-    `${published.length} post${published.length !== 1 ? 's' : ''}`;
+  const countBadge = document.getElementById('post-count-badge');
+  if(countBadge) countBadge.textContent = `${published.length} post${published.length !== 1 ? 's' : ''}`;
 
   const container = document.getElementById('home-content');
+  if(!container) return;
 
   if (!published.length && !drafts.length) {
     container.innerHTML = `
@@ -267,7 +271,6 @@ function renderHome() {
   let html = '';
 
   if (published.length) {
-    // Featured card (first post)
     const f = published[0];
     html += `
       <div class="featured-card" onclick="openPost('${f.id}')">
@@ -289,7 +292,6 @@ function renderHome() {
         </div>
       </div>`;
 
-    // Remaining posts grid
     if (published.length > 1) {
       html += `<div class="post-grid">`;
       published.slice(1).forEach(p => {
@@ -311,7 +313,6 @@ function renderHome() {
     }
   }
 
-  // Drafts section (owner only)
   if (drafts.length) {
     html += `
       <div class="drafts-section">
@@ -336,24 +337,12 @@ function renderHome() {
 // ══════════════════════════════════════════
 // OPEN POST (single post view)
 // ══════════════════════════════════════════
-function openPost(id, isSharedLink = false) {
+function openPost(id) {
   const post = posts.find(p => p.id === id);
   if (!post) { toast('Post not found.', 'error'); return; }
 
-  // Keep encoded hash when viewing from shared link, else allow local ID navigation
-  const activeHash = isSharedLink ? encodePostData(post) : post.id;
-  window.location.hash = `#post/${activeHash}`;
-
-  // Generate shareable URL with encoded post data
-  const shortUrl = `${window.location.origin}${window.location.pathname}#post/${post.id}`;
-  const longUrl  = `${window.location.origin}${window.location.pathname}#post/${encodePostData(post)}`;
-
-  let shareUrl;
-  if (isOwner && !isSharedLink) {
-    shareUrl = longUrl;
-  } else {
-    shareUrl = `${window.location.origin}${window.location.pathname}#post/${activeHash}`;
-  }
+  window.location.hash = `#post/${post.id}`;
+  const shareUrl = `${window.location.origin}${window.location.pathname}#post/${post.id}`;
 
   const viewerNotice = isViewerMode
     ? `<div class="viewer-notice">👁 View-only — shared post link</div>`
@@ -365,15 +354,11 @@ function openPost(id, isSharedLink = false) {
       <button class="btn-danger" onclick="askDelete('${post.id}')">🗑 Delete</button>
     </div>` : '';
 
-  const shareBlock = isOwner && !isSharedLink ? `
-    <div class="share-box">
-      <span class="share-label">Cross-device link (compressed)</span>
-      <span class="share-url">${longUrl}</span>
-      <button class="copy-btn" onclick="copyLink('${longUrl}')">Copy Cross-device Link</button>
-      <div style="margin-top:.75rem; font-size:.78rem; color:#a7f2ff">Short link for same host (local only):</div>
-      <span class="share-url">${shortUrl}</span>
-      <button class="copy-btn" onclick="copyLink('${shortUrl}')">Copy Short Link</button>
-    </div>` : '';
+  const shareBlock = `<div class="share-box">
+      <span class="share-label">Shareable Link</span>
+      <span class="share-url">${shareUrl}</span>
+      <button class="copy-btn" onclick="copyLink('${shareUrl}')">Copy Link</button>
+    </div>`;
 
   document.getElementById('pv-content').innerHTML = `
     ${!isViewerMode ? `<button class="pv-back" onclick="showView('home')">← Back to feed</button>` : '<div style="height:1rem;"></div>'}
@@ -441,52 +426,57 @@ function editPost(id) {
   showView('write');
 }
 
-function publishPost() {
-  const title   = document.getElementById('post-title').value.trim();
-  const content = document.getElementById('post-content').value.trim();
-  if (!title)   { toast('Add a title first.', 'error'); return; }
-  if (!content) { toast('Write some content first.', 'error'); return; }
-  savePost('published');
-}
+function publishPost() { savePost('published'); }
+function saveDraft() { savePost('draft'); }
 
-function saveDraft() {
-  savePost('draft');
-}
-
-function savePost(status) {
+async function savePost(status) {
   const title   = document.getElementById('post-title').value.trim()   || 'Untitled';
   const excerpt = document.getElementById('post-excerpt').value.trim();
   const content = document.getElementById('post-content').value.trim();
 
-  if (editingId) {
-    const idx = posts.findIndex(p => p.id === editingId);
-    if (idx !== -1) {
-      posts[idx] = {
-        ...posts[idx],
-        title, excerpt, content,
-        tags: [...tags],
-        cover: coverData,
-        status,
-        updatedAt: Date.now()
-      };
-    }
-    editingId = null;
+  if (!title && status === 'published')  { toast('Add a title first.', 'error'); return; }
+  if (!content && status === 'published') { toast('Write some content first.', 'error'); return; }
+
+  toast('Saving...', 'success');
+
+  const postData = {
+    id: editingId || Date.now().toString(),
+    title, 
+    excerpt, 
+    content,
+    tags: tags,
+    cover: coverData,
+    status,
+    updatedAt: Date.now()
+  };
+
+  if (!editingId) {
+    postData.createdAt = Date.now();
   } else {
-    posts.unshift({
-      id: Date.now().toString(),
-      title, excerpt, content,
-      tags: [...tags],
-      cover: coverData,
-      status,
-      createdAt: Date.now(),
-      updatedAt: Date.now()
-    });
+    const existing = posts.find(p => p.id === editingId);
+    postData.createdAt = existing ? existing.createdAt : Date.now();
   }
 
-  localStorage.setItem(KEY_POSTS, JSON.stringify(posts));
-  toast(status === 'published' ? '⚡ Published!' : '💾 Draft saved!', 'success');
-  resetEditor();
-  showView('home');
+  // UPSERT TO SUPABASE
+  try {
+    const { error } = await supabaseClient.from('posts').upsert(postData);
+    if (error) throw error;
+
+    if (editingId) {
+      const idx = posts.findIndex(p => p.id === editingId);
+      if (idx !== -1) posts[idx] = postData;
+    } else {
+      posts.unshift(postData);
+    }
+
+    toast(status === 'published' ? '⚡ Published!' : '💾 Draft saved!', 'success');
+    resetEditor();
+    showView('home');
+
+  } catch (err) {
+    console.error('Failed to save:', err);
+    toast('Error saving to database.', 'error');
+  }
 }
 
 // ══════════════════════════════════════════
@@ -494,30 +484,45 @@ function savePost(status) {
 // ══════════════════════════════════════════
 function askDelete(id) {
   deleteId = id;
-  document.getElementById('del-modal').classList.add('open');
+  const modal = document.getElementById('del-modal');
+  if(modal) modal.classList.add('open');
 }
 
 function closeDelModal() {
   deleteId = null;
-  document.getElementById('del-modal').classList.remove('open');
+  const modal = document.getElementById('del-modal');
+  if(modal) modal.classList.remove('open');
 }
 
-function confirmDelete() {
-  posts = posts.filter(p => p.id !== deleteId);
-  localStorage.setItem(KEY_POSTS, JSON.stringify(posts));
-  closeDelModal();
-  toast('Post deleted.', 'success');
-  showView('home');
+async function confirmDelete() {
+  if(!deleteId) return;
+  toast('Deleting...', 'success');
+  
+  try {
+    const { error } = await supabaseClient.from('posts').delete().eq('id', deleteId);
+    if (error) throw error;
+
+    posts = posts.filter(p => p.id !== deleteId);
+    closeDelModal();
+    toast('Post deleted.', 'success');
+    showView('home');
+  } catch (err) {
+    console.error('Delete failed:', err);
+    toast('Error deleting post.', 'error');
+  }
 }
 
 // ══════════════════════════════════════════
-// COVER IMAGE
+// COVER IMAGE (Base64)
 // ══════════════════════════════════════════
 function handleCover(input) {
   if (input.files && input.files[0]) readCoverFile(input.files[0]);
 }
 
 function readCoverFile(file) {
+  if(file.size > 2 * 1024 * 1024) { 
+    toast('Image is large. DB save might fail.', 'error');
+  }
   const reader = new FileReader();
   reader.onload = e => {
     coverData = e.target.result;
@@ -536,21 +541,22 @@ function removeCover() {
   if (inp) inp.value = '';
 }
 
-// Drag-and-drop on cover zone
 const coverZone = document.getElementById('cover-zone');
-coverZone.addEventListener('dragover',  e => { e.preventDefault(); coverZone.classList.add('over'); });
-coverZone.addEventListener('dragleave', () => coverZone.classList.remove('over'));
-coverZone.addEventListener('drop', e => {
-  e.preventDefault();
-  coverZone.classList.remove('over');
-  const file = e.dataTransfer.files[0];
-  if (file && file.type.startsWith('image/')) readCoverFile(file);
-});
+if(coverZone) {
+  coverZone.addEventListener('dragover',  e => { e.preventDefault(); coverZone.classList.add('over'); });
+  coverZone.addEventListener('dragleave', () => coverZone.classList.remove('over'));
+  coverZone.addEventListener('drop', e => {
+    e.preventDefault();
+    coverZone.classList.remove('over');
+    const file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith('image/')) readCoverFile(file);
+  });
+}
 
 // ══════════════════════════════════════════
 // TAGS
 // ══════════════════════════════════════════
-document.getElementById('tag-input').addEventListener('keydown', function (e) {
+document.getElementById('tag-input')?.addEventListener('keydown', function (e) {
   if ((e.key === 'Enter' || e.key === ',') && this.value.trim()) {
     e.preventDefault();
     addTag(this.value.trim().replace(/,/g, ''));
@@ -575,6 +581,7 @@ function removeTag(val) {
 function renderTagsUI() {
   const wrap = document.getElementById('tags-wrap');
   const inp  = document.getElementById('tag-input');
+  if(!wrap) return;
   wrap.querySelectorAll('.tag-item').forEach(el => el.remove());
   tags.forEach(t => {
     const el = document.createElement('span');
@@ -584,7 +591,6 @@ function renderTagsUI() {
   });
 }
 
-// Helper to render tag chips for post cards / post view
 function renderTags(tagArr, size = 'default') {
   if (!tagArr || !tagArr.length) return '<span class="card-tag">Essay</span>';
   const limit = size === 'small' ? 2 : tagArr.length;
@@ -592,18 +598,18 @@ function renderTags(tagArr, size = 'default') {
 }
 
 // ══════════════════════════════════════════
-// WORD COUNT (live)
+// UTILS & MISC
 // ══════════════════════════════════════════
-document.getElementById('post-content').addEventListener('input', updateWordCount);
+document.getElementById('post-content')?.addEventListener('input', updateWordCount);
 
 function updateWordCount() {
-  const wc = wordCount(document.getElementById('post-content').value);
-  document.getElementById('word-count').textContent = `${wc} word${wc !== 1 ? 's' : ''}`;
+  const el = document.getElementById('post-content');
+  if(!el) return;
+  const wc = wordCount(el.value);
+  const wcEl = document.getElementById('word-count');
+  if(wcEl) wcEl.textContent = `${wc} word${wc !== 1 ? 's' : ''}`;
 }
 
-// ══════════════════════════════════════════
-// TOOLBAR HELPERS
-// ══════════════════════════════════════════
 function ins(before, after) {
   const ta  = document.getElementById('post-content');
   const s   = ta.selectionStart;
@@ -630,15 +636,19 @@ function insBlock(before, after) {
   ta.focus();
 }
 
-// ══════════════════════════════════════════
-// RESET EDITOR
-// ══════════════════════════════════════════
 function resetEditor() {
-  document.getElementById('post-title').value   = '';
-  document.getElementById('post-excerpt').value = '';
-  document.getElementById('post-content').value = '';
-  document.getElementById('word-count').textContent = '0 words';
-  document.getElementById('write-heading').textContent = 'New Post';
+  const title = document.getElementById('post-title');
+  const excerpt = document.getElementById('post-excerpt');
+  const content = document.getElementById('post-content');
+  const header = document.getElementById('write-heading');
+  const wordCountEl = document.getElementById('word-count');
+
+  if(title) title.value   = '';
+  if(excerpt) excerpt.value = '';
+  if(content) content.value = '';
+  if(wordCountEl) wordCountEl.textContent = '0 words';
+  if(header) header.textContent = 'New Post';
+  
   tags      = [];
   coverData = null;
   editingId = null;
@@ -646,49 +656,53 @@ function resetEditor() {
   removeCover();
 }
 
-// ══════════════════════════════════════════
-// ABOUT VIEW
-// ══════════════════════════════════════════
+// ABOUT logic kept to local storage to avoid extra DB schemas for now
 function renderAbout() {
-  document.getElementById('abt-name').textContent   = about.name   || 'Author';
-  document.getElementById('abt-handle').textContent = about.handle || '@void';
-  document.getElementById('abt-bio').textContent    = about.bio    || '';
+  const n = document.getElementById('abt-name');
+  const h = document.getElementById('abt-handle');
+  const b = document.getElementById('abt-bio');
+  if(n) n.textContent   = about.name   || 'Author';
+  if(h) h.textContent = about.handle || '@void';
+  if(b) b.textContent    = about.bio    || '';
 
   const av = document.getElementById('av-display');
-  av.innerHTML = about.avatar
-    ? `<img src="${about.avatar}" alt="Avatar">`
-    : (about.name || 'A')[0].toUpperCase();
+  if(av) {
+    av.innerHTML = about.avatar
+      ? `<img src="${about.avatar}" alt="Avatar">`
+      : (about.name || 'A')[0].toUpperCase();
+  }
 
   const editWrap = document.getElementById('about-edit-wrap');
-
-  if (isOwner && !isViewerMode) {
-    editWrap.innerHTML = `
-      <button class="edit-toggle-btn" onclick="toggleAboutEdit()">✏️ Edit Profile</button>
-      <div class="about-edit-form" id="about-edit-form" style="display:none;">
-        <div class="field" style="margin-top:1.25rem;">
-          <label>Display Name</label>
-          <input type="text" id="abt-name-inp" value="${esc(about.name || '')}" />
-        </div>
-        <div class="field">
-          <label>Handle / Title</label>
-          <input type="text" id="abt-handle-inp" value="${esc(about.handle || '')}" />
-        </div>
-        <div class="field">
-          <label>Bio</label>
-          <textarea id="abt-bio-inp" style="min-height:120px;resize:vertical;">${esc(about.bio || '')}</textarea>
-        </div>
-        <div class="field">
-          <label>Profile Photo</label>
-          <div class="upload-zone" style="position:relative;">
-            <input type="file" accept="image/*" onchange="handleAvatar(this)" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;" />
-            <div class="upload-icon">👤</div>
-            <div class="upload-text">Click to upload</div>
+  if(editWrap) {
+    if (isOwner && !isViewerMode) {
+      editWrap.innerHTML = `
+        <button class="edit-toggle-btn" onclick="toggleAboutEdit()">✏️ Edit Profile</button>
+        <div class="about-edit-form" id="about-edit-form" style="display:none;">
+          <div class="field" style="margin-top:1.25rem;">
+            <label>Display Name</label>
+            <input type="text" id="abt-name-inp" value="${esc(about.name || '')}" />
           </div>
-        </div>
-        <button class="btn-primary" onclick="saveAbout()">Save Profile</button>
-      </div>`;
-  } else {
-    editWrap.innerHTML = '';
+          <div class="field">
+            <label>Handle / Title</label>
+            <input type="text" id="abt-handle-inp" value="${esc(about.handle || '')}" />
+          </div>
+          <div class="field">
+            <label>Bio</label>
+            <textarea id="abt-bio-inp" style="min-height:120px;resize:vertical;">${esc(about.bio || '')}</textarea>
+          </div>
+          <div class="field">
+            <label>Profile Photo</label>
+            <div class="upload-zone" style="position:relative;">
+              <input type="file" accept="image/*" onchange="handleAvatar(this)" style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;" />
+              <div class="upload-icon">👤</div>
+              <div class="upload-text">Click to upload</div>
+            </div>
+          </div>
+          <button class="btn-primary" onclick="saveAbout()">Save Profile</button>
+        </div>`;
+    } else {
+      editWrap.innerHTML = '';
+    }
   }
 }
 
@@ -735,461 +749,34 @@ function handleAvatar(input) {
   reader.readAsDataURL(input.files[0]);
 }
 
-// ══════════════════════════════════════════
-// MARKDOWN RENDERER
-// ══════════════════════════════════════════
 function renderMarkdown(md) {
   if (!md) return '';
   let h = esc(md);
-
-  // Code blocks (must come first)
   h = h.replace(/```([\s\S]*?)```/g, (_, code) => `<pre><code>${code.trim()}</code></pre>`);
-
-  // Headings
   h = h.replace(/^### (.+)$/gm, '<h3>$1</h3>');
   h = h.replace(/^## (.+)$/gm,  '<h2>$1</h2>');
   h = h.replace(/^# (.+)$/gm,   '<h2>$1</h2>');
-
-  // Blockquote
   h = h.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
-
-  // Bold + italic
   h = h.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
   h = h.replace(/\*\*(.+?)\*\*/g,     '<strong>$1</strong>');
   h = h.replace(/\*(.+?)\*/g,         '<em>$1</em>');
-
-  // Inline code
   h = h.replace(/`(.+?)`/g, '<code>$1</code>');
-
-  // Horizontal rule
   h = h.replace(/^---$/gm, '<hr>');
-
-  // Unordered lists
   h = h.replace(/(^- .+$\n?)+/gm, match => {
     const items = match.trim().split('\n').map(l => `<li>${l.replace(/^- /, '')}</li>`).join('');
     return `<ul>${items}</ul>`;
   });
-
-  // Ordered lists
   h = h.replace(/(^\d+\. .+$\n?)+/gm, match => {
     const items = match.trim().split('\n').map(l => `<li>${l.replace(/^\d+\. /, '')}</li>`).join('');
     return `<ol>${items}</ol>`;
   });
-
-  // Wrap remaining lines in paragraphs
   h = h.split(/\n\n+/).map(block => {
     if (/^<(h[1-6]|ul|ol|blockquote|pre|hr)/.test(block)) return block;
     return `<p>${block.replace(/\n/g, '<br>')}</p>`;
   }).join('\n');
-
   return h;
 }
 
-// ══════════════════════════════════════════
-// POST DATA ENCODING (for shareable links)
-// ══════════════════════════════════════════
-// simple LZ-string (URL safe) helper; inlined to avoid external dependency
-const LZString = {
-  keyStrUriSafe: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-$",
-
-  compressToEncodedURIComponent: function (input) {
-    if (input == null) return "";
-    return this._compress(input, 6, function (a) {
-      return LZString.keyStrUriSafe.charAt(a);
-    });
-  },
-
-  decompressFromEncodedURIComponent: function (input) {
-    if (input == null) return "";
-    if (input == "") return null;
-    input = input.replace(/ /g, "+");
-    return this._decompress(input.length, 32, function (index) {
-      return LZString.keyStrUriSafe.indexOf(input.charAt(index));
-    });
-  },
-
-  _compress: function (uncompressed, bitsPerChar, getCharFromInt) {
-    if (uncompressed == null) return "";
-    let i, value,
-      context_dictionary = {},
-      context_dictionaryToCreate = {},
-      context_c = "",
-      context_wc = "",
-      context_w = "",
-      context_enlargeIn = 2,
-      context_dictSize = 3,
-      context_numBits = 2,
-      context_data = [],
-      context_data_val = 0,
-      context_data_position = 0;
-    for (i = 0; i < uncompressed.length; i += 1) {
-      context_c = uncompressed.charAt(i);
-      if (!Object.prototype.hasOwnProperty.call(context_dictionary, context_c)) {
-        context_dictionary[context_c] = context_dictSize++;
-        context_dictionaryToCreate[context_c] = true;
-      }
-      context_wc = context_w + context_c;
-      if (Object.prototype.hasOwnProperty.call(context_dictionary, context_wc)) {
-        context_w = context_wc;
-      } else {
-        if (Object.prototype.hasOwnProperty.call(context_dictionaryToCreate, context_w)) {
-          if (context_w.charCodeAt(0) < 256) {
-            for (i = 0; i < context_numBits; i += 1) {
-              context_data_val = (context_data_val << 1);
-              if (context_data_position == bitsPerChar - 1) {
-                context_data_position = 0;
-                context_data.push(getCharFromInt(context_data_val));
-                context_data_val = 0;
-              } else {
-                context_data_position++;
-              }
-            }
-            value = context_w.charCodeAt(0);
-            for (i = 0; i < 8; i += 1) {
-              context_data_val = (context_data_val << 1) | (value & 1);
-              if (context_data_position == bitsPerChar - 1) {
-                context_data_position = 0;
-                context_data.push(getCharFromInt(context_data_val));
-                context_data_val = 0;
-              } else {
-                context_data_position++;
-              }
-              value = value >> 1;
-            }
-          } else {
-            value = 1;
-            for (i = 0; i < context_numBits; i += 1) {
-              context_data_val = (context_data_val << 1) | value;
-              if (context_data_position == bitsPerChar - 1) {
-                context_data_position = 0;
-                context_data.push(getCharFromInt(context_data_val));
-                context_data_val = 0;
-              } else {
-                context_data_position++;
-              }
-              value = 0;
-            }
-            value = context_w.charCodeAt(0);
-            for (i = 0; i < 16; i += 1) {
-              context_data_val = (context_data_val << 1) | (value & 1);
-              if (context_data_position == bitsPerChar - 1) {
-                context_data_position = 0;
-                context_data.push(getCharFromInt(context_data_val));
-                context_data_val = 0;
-              } else {
-                context_data_position++;
-              }
-              value = value >> 1;
-            }
-          }
-          context_enlargeIn--;
-          if (context_enlargeIn == 0) {
-            context_enlargeIn = Math.pow(2, context_numBits);
-            context_numBits++;
-          }
-          delete context_dictionaryToCreate[context_w];
-        } else {
-          value = context_dictionary[context_w];
-          for (i = 0; i < context_numBits; i += 1) {
-            context_data_val = (context_data_val << 1) | (value & 1);
-            if (context_data_position == bitsPerChar - 1) {
-              context_data_position = 0;
-              context_data.push(getCharFromInt(context_data_val));
-              context_data_val = 0;
-            } else {
-              context_data_position++;
-            }
-            value = value >> 1;
-          }
-        }
-        context_enlargeIn--;
-        if (context_enlargeIn == 0) {
-          context_enlargeIn = Math.pow(2, context_numBits);
-          context_numBits++;
-        }
-        context_dictionary[context_wc] = context_dictSize++;
-        context_w = String(context_c);
-      }
-    }
-    if (context_w !== "") {
-      if (Object.prototype.hasOwnProperty.call(context_dictionaryToCreate, context_w)) {
-        if (context_w.charCodeAt(0) < 256) {
-          for (i = 0; i < context_numBits; i += 1) {
-            context_data_val = (context_data_val << 1);
-            if (context_data_position == bitsPerChar - 1) {
-              context_data_position = 0;
-              context_data.push(getCharFromInt(context_data_val));
-              context_data_val = 0;
-            } else {
-              context_data_position++;
-            }
-          }
-          value = context_w.charCodeAt(0);
-          for (i = 0; i < 8; i += 1) {
-            context_data_val = (context_data_val << 1) | (value & 1);
-            if (context_data_position == bitsPerChar - 1) {
-              context_data_position = 0;
-              context_data.push(getCharFromInt(context_data_val));
-              context_data_val = 0;
-            } else {
-              context_data_position++;
-            }
-            value = value >> 1;
-          }
-        } else {
-          value = 1;
-          for (i = 0; i < context_numBits; i += 1) {
-            context_data_val = (context_data_val << 1) | value;
-            if (context_data_position == bitsPerChar - 1) {
-              context_data_position = 0;
-              context_data.push(getCharFromInt(context_data_val));
-              context_data_val = 0;
-            } else {
-              context_data_position++;
-            }
-            value = 0;
-          }
-          value = context_w.charCodeAt(0);
-          for (i = 0; i < 16; i += 1) {
-            context_data_val = (context_data_val << 1) | (value & 1);
-            if (context_data_position == bitsPerChar - 1) {
-              context_data_position = 0;
-              context_data.push(getCharFromInt(context_data_val));
-              context_data_val = 0;
-            } else {
-              context_data_position++;
-            }
-            value = value >> 1;
-          }
-        }
-        context_enlargeIn--;
-        if (context_enlargeIn == 0) {
-          context_enlargeIn = Math.pow(2, context_numBits);
-          context_numBits++;
-        }
-        delete context_dictionaryToCreate[context_w];
-      } else {
-        value = context_dictionary[context_w];
-        for (i = 0; i < context_numBits; i += 1) {
-          context_data_val = (context_data_val << 1) | (value & 1);
-          if (context_data_position == bitsPerChar - 1) {
-            context_data_position = 0;
-            context_data.push(getCharFromInt(context_data_val));
-            context_data_val = 0;
-          } else {
-            context_data_position++;
-          }
-          value = value >> 1;
-        }
-      }
-    }
-    value = 2;
-    for (i = 0; i < context_numBits; i += 1) {
-      context_data_val = (context_data_val << 1) | (value & 1);
-      if (context_data_position == bitsPerChar - 1) {
-        context_data_position = 0;
-        context_data.push(getCharFromInt(context_data_val));
-        context_data_val = 0;
-      } else {
-        context_data_position++;
-      }
-      value = value >> 1;
-    }
-    while (context_data_val > 0) {
-      context_data_val = (context_data_val << 1);
-      if (context_data_position == bitsPerChar - 1) {
-        context_data_position = 0;
-        context_data.push(getCharFromInt(context_data_val));
-        context_data_val = 0;
-      } else {
-        context_data_position++;
-      }
-    }
-    return context_data.join("");
-  },
-
-  _decompress: function (length, resetValue, getNextValue) {
-    let dictionary = [""],
-      next, enlargeIn = 4,
-      dictSize = 4,
-      numBits = 3,
-      entry = "",
-      result = [],
-      w, bits, resb, maxpower, power,
-      c, data = { val: getNextValue(0), position: resetValue, index: 1 };
-
-    for (let i = 0; i < 3; i += 1) {
-      dictionary[i] = i;
-    }
-    bits = 0;
-    maxpower = Math.pow(2, 2);
-    power = 1;
-    while (power != maxpower) {
-      resb = data.val & data.position;
-      data.position >>= 1;
-      if (data.position == 0) {
-        data.position = resetValue;
-        data.val = getNextValue(data.index++);
-      }
-      bits |= (resb > 0 ? 1 : 0) * power;
-      power *= 2;
-    }
-    switch (next = bits) {
-      case 0:
-        bits = 0;
-        maxpower = Math.pow(2, 8);
-        power = 1;
-        while (power != maxpower) {
-          resb = data.val & data.position;
-          data.position >>= 1;
-          if (data.position == 0) {
-            data.position = resetValue;
-            data.val = getNextValue(data.index++);
-          }
-          bits |= (resb > 0 ? 1 : 0) * power;
-          power *= 2;
-        }
-        c = String.fromCharCode(bits);
-        break;
-      case 1:
-        bits = 0;
-        maxpower = Math.pow(2, 16);
-        power = 1;
-        while (power != maxpower) {
-          resb = data.val & data.position;
-          data.position >>= 1;
-          if (data.position == 0) {
-            data.position = resetValue;
-            data.val = getNextValue(data.index++);
-          }
-          bits |= (resb > 0 ? 1 : 0) * power;
-          power *= 2;
-        }
-        c = String.fromCharCode(bits);
-        break;
-      case 2:
-        return "";
-    }
-    dictionary[3] = c;
-    w = c;
-    result.push(c);
-    while (true) {
-      if (data.index > length) return "";
-
-      bits = 0;
-      maxpower = Math.pow(2, numBits);
-      power = 1;
-      while (power != maxpower) {
-        resb = data.val & data.position;
-        data.position >>= 1;
-        if (data.position == 0) {
-          data.position = resetValue;
-          data.val = getNextValue(data.index++);
-        }
-        bits |= (resb > 0 ? 1 : 0) * power;
-        power *= 2;
-      }
-
-      switch (c = bits) {
-        case 0:
-          bits = 0;
-          maxpower = Math.pow(2, 8);
-          power = 1;
-          while (power != maxpower) {
-            resb = data.val & data.position;
-            data.position >>= 1;
-            if (data.position == 0) {
-              data.position = resetValue;
-              data.val = getNextValue(data.index++);
-            }
-            bits |= (resb > 0 ? 1 : 0) * power;
-            power *= 2;
-          }
-          dictionary[dictSize++] = String.fromCharCode(bits);
-          c = dictSize - 1;
-          enlargeIn--;
-          break;
-        case 1:
-          bits = 0;
-          maxpower = Math.pow(2, 16);
-          power = 1;
-          while (power != maxpower) {
-            resb = data.val & data.position;
-            data.position >>= 1;
-            if (data.position == 0) {
-              data.position = resetValue;
-              data.val = getNextValue(data.index++);
-            }
-            bits |= (resb > 0 ? 1 : 0) * power;
-            power *= 2;
-          }
-          dictionary[dictSize++] = String.fromCharCode(bits);
-          c = dictSize - 1;
-          enlargeIn--;
-          break;
-        case 2:
-          return result.join("");
-      }
-
-      if (enlargeIn == 0) {
-        enlargeIn = Math.pow(2, numBits);
-        numBits++;
-      }
-
-      if (dictionary[c]) {
-        entry = dictionary[c];
-      } else {
-        if (c === dictSize) {
-          entry = w + w.charAt(0);
-        } else {
-          return null;
-        }
-      }
-      result.push(entry);
-      dictionary[dictSize++] = w + entry.charAt(0);
-      dictSize++;
-      w = entry;
-
-      enlargeIn--;
-
-      if (enlargeIn == 0) {
-        enlargeIn = Math.pow(2, numBits);
-        numBits++;
-      }
-    }
-  }
-};
-
-function encodePostData(post) {
-  try {
-    // Exclude cover image to keep URL shorter
-    const sharedPost = { ...post };
-    delete sharedPost.cover;
-    const json = JSON.stringify(sharedPost);
-    return encodeURIComponent(LZString.compressToEncodedURIComponent(json));
-  } catch (e) {
-    console.error('Encoding failed:', e);
-    return post.id;
-  }
-}
-
-function decodePostData(encoded) {
-  try {
-    if (!encoded || encoded.length <= 10) return null;
-    const decodedUri = decodeURIComponent(encoded);
-    const json = LZString.decompressFromEncodedURIComponent(decodedUri);
-    const post = JSON.parse(json);
-    if (post && post.title && post.content && post.id) return post;
-  } catch (e) {
-    console.log("Failed Payload String:", encoded);
-    console.error('Decoding failed:', e);
-  }
-  return null;
-}
-
-// ══════════════════════════════════════════
-// UTILITIES
-// ══════════════════════════════════════════
 function esc(str) {
   return (str || '')
     .replace(/&/g,  '&amp;')
@@ -1199,28 +786,16 @@ function esc(str) {
     .replace(/'/g,  '&#39;');
 }
 
-function stripMd(str) {
-  return (str || '').replace(/[#*`_~>]/g, '').replace(/\n/g, ' ').trim();
-}
-
-function wordCount(text) {
-  return (text || '').trim().split(/\s+/).filter(Boolean).length;
-}
-
-function readTime(text) {
-  return Math.max(1, Math.round(wordCount(text) / 200));
-}
-
+function stripMd(str) { return (str || '').replace(/[#*`_~>]/g, '').replace(/\n/g, ' ').trim(); }
+function wordCount(text) { return (text || '').trim().split(/\s+/).filter(Boolean).length; }
+function readTime(text) { return Math.max(1, Math.round(wordCount(text) / 200)); }
 function fmtDate(timestamp) {
-  return new Date(timestamp).toLocaleDateString('en-US', {
-    month: 'short',
-    day:   'numeric',
-    year:  'numeric'
-  });
+  return new Date(Number(timestamp)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 function toast(message, type = 'success') {
   const el = document.getElementById('toast');
+  if(!el) return;
   el.textContent = message;
   el.className   = `toast ${type} show`;
   setTimeout(() => el.classList.remove('show'), 3200);
