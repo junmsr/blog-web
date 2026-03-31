@@ -90,7 +90,7 @@ async function boot() {
     isOwner = true;
   }
 
-  // 1. Instantly lock into Viewer Mode if it's a shared link
+  // Instantly lock into Viewer Mode if it's a shared link
   if (isSharedLink) {
     isViewerMode = true;
     isOwner = false;
@@ -98,7 +98,33 @@ async function boot() {
   
   applyMode();
 
-  // 2. ONLY show password modals if they are NOT viewing a shared link
+  // 1. Show the full-screen loader
+  showLoader();
+
+  // 2. Fetch data AND force a minimum 800ms delay so the loader is actually seen
+  try {
+    const fetchPromise = supabaseClient
+      .from('posts')
+      .select('*')
+      .order('createdAt', { ascending: false });
+      
+    // This creates an artificial 800ms minimum loading time for a smooth UX
+    const minDelayPromise = new Promise(res => setTimeout(res, 800));
+
+    // Wait for BOTH the database to finish AND the 800ms to pass
+    const [response] = await Promise.all([fetchPromise, minDelayPromise]);
+
+    if (response.error) throw response.error;
+    posts = response.data || [];
+  } catch (err) {
+    console.error('Failed to fetch posts:', err);
+    toast('Database connection failed.', 'error');
+  }
+
+  // 3. Hide the loader gracefully once data is ready
+  hideLoader();
+
+  // 4. ONLY show password modals if they are NOT viewing a shared link
   if (!isSharedLink) {
     const hasPwd = localStorage.getItem(KEY_PWD);
     if (!hasPwd) {
@@ -108,21 +134,7 @@ async function boot() {
     }
   }
 
-  // ── FETCH POSTS FROM SUPABASE ──
-  try {
-    const { data: dbPosts, error } = await supabaseClient
-      .from('posts')
-      .select('*')
-      .order('createdAt', { ascending: false });
-
-    if (error) throw error;
-    posts = dbPosts || [];
-  } catch (err) {
-    console.error('Failed to fetch posts:', err);
-    toast('Database connection failed.', 'error');
-  }
-
-  // 3. Complete the routing now that data is loaded
+  // 5. Complete the routing now that data is loaded
   if (isSharedLink) {
     const postId = hash.slice(6);
     const activePost = posts.find(p => p.id === postId && p.status === 'published');
