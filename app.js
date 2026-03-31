@@ -802,7 +802,7 @@ function updateAboutSidebar() {
   const homeDesc   = document.getElementById('home-desc');
 
   if (siteLogoEl) {
-    const name = (about.name || 'VOID').split(' ')[0].toUpperCase();
+    const name = (about.name || 'JUNMAR').split(' ')[0].toUpperCase();
     siteLogoEl.innerHTML = `${name}<span>.</span>BLOG`;
   }
 
