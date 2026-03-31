@@ -37,7 +37,7 @@ function showLoader() {
     loader.innerHTML = `
       <div style="text-align: center;">
         <div style="font-family: 'Syne', sans-serif; font-size: 1.5rem; font-weight: 800; color: var(--text); letter-spacing: -0.02em; margin-bottom: 0.5rem;">
-          VOID<span style="color: var(--cyan);">.</span>BLOG
+          JUNMAR<span style="color: var(--cyan);">.</span>BLOG
         </div>
         <div style="font-family: 'Space Mono', monospace; font-size: 0.6rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted);">
           Syncing Data<span class="dots"><span>.</span><span>.</span><span>.</span></span>
