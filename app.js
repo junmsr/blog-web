@@ -29,17 +29,29 @@ let isSetupMode  = false;
 // ══════════════════════════════════════════
 async function boot() {
   const hash = window.location.hash;
+  const isSharedLink = hash.startsWith('#post/');
 
+  // Restore session auth if it exists
   if (sessionStorage.getItem(KEY_AUTH) === '1') {
     isOwner = true;
   }
+
+  // 1. Instantly lock into Viewer Mode if it's a shared link
+  if (isSharedLink) {
+    isViewerMode = true;
+    isOwner = false;
+  }
+  
   applyMode();
 
-  const hasPwd = localStorage.getItem(KEY_PWD);
-  if (!hasPwd) {
-    showSetupModal();
-  } else if (!isOwner && !hash.startsWith('#post/')) {
-    openPwdModal();
+  // 2. ONLY show password modals if they are NOT viewing a shared link
+  if (!isSharedLink) {
+    const hasPwd = localStorage.getItem(KEY_PWD);
+    if (!hasPwd) {
+      showSetupModal();       // First launch: create password
+    } else if (!isOwner) {
+      openPwdModal();         // Returning owner: prompt login
+    }
   }
 
   // ── FETCH POSTS FROM SUPABASE ──
@@ -56,12 +68,9 @@ async function boot() {
     toast('Database connection failed.', 'error');
   }
 
-  if (hash.startsWith('#post/')) {
+  // 3. Complete the routing now that data is loaded
+  if (isSharedLink) {
     const postId = hash.slice(6);
-    isViewerMode = true;
-    isOwner      = false;
-    applyMode();
-    
     const activePost = posts.find(p => p.id === postId && p.status === 'published');
     
     if (activePost) {
@@ -404,8 +413,9 @@ function editPost(id) {
   const p = posts.find(x => x.id === id);
   if (!p) return;
 
-  editingId = id;
+  // FIX: Run reset FIRST, then set the editing ID!
   resetEditor();
+  editingId = id;
 
   document.getElementById('post-title').value   = p.title   || '';
   document.getElementById('post-excerpt').value = p.excerpt || '';
@@ -423,7 +433,7 @@ function editPost(id) {
   }
 
   updateWordCount();
-  showView('write');
+  showView('write'); // Now showView won't wipe it out!
 }
 
 function publishPost() { savePost('published'); }
