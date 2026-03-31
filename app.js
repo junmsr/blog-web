@@ -25,6 +25,60 @@ let deleteId     = null;
 let isSetupMode  = false;
 
 // ══════════════════════════════════════════
+// LOADER UTILS (Dynamically injected)
+// ══════════════════════════════════════════
+function showLoader() {
+  let loader = document.getElementById('global-loader');
+  if (!loader) {
+    loader = document.createElement('div');
+    loader.id = 'global-loader';
+    
+    // Match the VOID.BLOG aesthetic
+    loader.innerHTML = `
+      <div style="text-align: center;">
+        <div style="font-family: 'Syne', sans-serif; font-size: 1.5rem; font-weight: 800; color: var(--text); letter-spacing: -0.02em; margin-bottom: 0.5rem;">
+          VOID<span style="color: var(--cyan);">.</span>BLOG
+        </div>
+        <div style="font-family: 'Space Mono', monospace; font-size: 0.6rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted);">
+          Syncing Data<span class="dots"><span>.</span><span>.</span><span>.</span></span>
+        </div>
+      </div>
+    `;
+
+    Object.assign(loader.style, {
+      position: 'fixed', inset: '0', zIndex: '99999',
+      backgroundColor: 'var(--bg)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      transition: 'opacity 0.4s ease, visibility 0.4s ease'
+    });
+
+    if (!document.getElementById('loader-style')) {
+      const style = document.createElement('style');
+      style.id = 'loader-style';
+      style.innerHTML = `
+        @keyframes syncBlink { 0%, 20% { opacity: 0; } 50%, 100% { opacity: 1; } }
+        .dots span { animation: syncBlink 1.4s infinite both; }
+        .dots span:nth-child(2) { animation-delay: 0.2s; }
+        .dots span:nth-child(3) { animation-delay: 0.4s; }
+      `;
+      document.head.appendChild(style);
+    }
+    document.body.appendChild(loader);
+  }
+  
+  loader.style.opacity = '1';
+  loader.style.visibility = 'visible';
+}
+
+function hideLoader() {
+  const loader = document.getElementById('global-loader');
+  if (loader) {
+    loader.style.opacity = '0';
+    loader.style.visibility = 'hidden';
+  }
+}
+
+// ══════════════════════════════════════════
 // BOOT
 // ══════════════════════════════════════════
 async function boot() {
