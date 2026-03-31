@@ -84,34 +84,27 @@ function hideLoader() {
 async function boot() {
   const hash = window.location.hash;
   const isSharedLink = hash.startsWith('#post/');
+  const isSecretLogin = hash === '#login'; // <-- The Secret Backdoor
 
-  // Restore session auth if it exists
   if (sessionStorage.getItem(KEY_AUTH) === '1') {
     isOwner = true;
   }
 
-  // Instantly lock into Viewer Mode if it's a shared link
   if (isSharedLink) {
     isViewerMode = true;
     isOwner = false;
   }
   
   applyMode();
-
-  // 1. Show the full-screen loader
   showLoader();
 
-  // 2. Fetch data AND force a minimum 800ms delay so the loader is actually seen
   try {
     const fetchPromise = supabaseClient
       .from('posts')
       .select('*')
       .order('createdAt', { ascending: false });
       
-    // This creates an artificial 800ms minimum loading time for a smooth UX
     const minDelayPromise = new Promise(res => setTimeout(res, 800));
-
-    // Wait for BOTH the database to finish AND the 800ms to pass
     const [response] = await Promise.all([fetchPromise, minDelayPromise]);
 
     if (response.error) throw response.error;
@@ -121,18 +114,22 @@ async function boot() {
     toast('Database connection failed.', 'error');
   }
 
-  // 3. Hide the loader gracefully once data is ready
   hideLoader();
 
-  // 4. ONLY show password modals if they are NOT viewing a shared link
-  if (!isSharedLink) {
+  // FIX: The Secret Backdoor Trigger
+  if (isSecretLogin && !isOwner) {
+    openPwdModal();
+    history.replaceState(null, null, ' '); // Cleans '#login' out of the URL after it opens
+  }
+
+  // Still auto-prompt if it's a known owner device
+  if (!isSharedLink && !isSecretLogin) {
     const hasPwd = localStorage.getItem(KEY_PWD);
     if (hasPwd && !isOwner) {
       openPwdModal();         
     }
   }
 
-  // 5. Complete the routing now that data is loaded
   if (isSharedLink) {
     const postId = hash.slice(6);
     const activePost = posts.find(p => p.id === postId && p.status === 'published');
@@ -195,7 +192,8 @@ function applyMode() {
     if(ownerBadge) ownerBadge.style.display  = 'none';
     if(navWrite) navWrite.style.display    = 'none';
     if(logoutBtn) logoutBtn.style.display   = 'none';
-    if(loginSmall) loginSmall.style.display  = 'inline-flex';
+    // FIX: Hide the login button for ALL regular viewers!
+    if(loginSmall) loginSmall.style.display  = 'none';
   }
 }
 
