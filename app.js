@@ -127,11 +127,10 @@ async function boot() {
   // 4. ONLY show password modals if they are NOT viewing a shared link
   if (!isSharedLink) {
     const hasPwd = localStorage.getItem(KEY_PWD);
-    if (!hasPwd) {
-      showSetupModal();       // First launch: create password
-    } else if (!isOwner) {
-      openPwdModal();         // Returning owner: prompt login
+    if (hasPwd && !isOwner) {
+      openPwdModal();         // Returning owner device: prompt login
     }
+    // If there is no password saved, do absolutely nothing. Let them read in peace!
   }
 
   // 5. Complete the routing now that data is loaded
@@ -225,6 +224,13 @@ function showSetupModal() {
 }
 
 function openPwdModal() {
+  // Smart check: If you click Login but haven't set a password yet, switch to Setup mode
+  const hasPwd = localStorage.getItem(KEY_PWD);
+  if (!hasPwd) {
+    showSetupModal();
+    return;
+  }
+
   isSetupMode = false;
   const m = document.getElementById('pwd-modal');
   if(!m) return;
