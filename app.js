@@ -128,9 +128,8 @@ async function boot() {
   if (!isSharedLink) {
     const hasPwd = localStorage.getItem(KEY_PWD);
     if (hasPwd && !isOwner) {
-      openPwdModal();         // Returning owner device: prompt login
+      openPwdModal();         
     }
-    // If there is no password saved, do absolutely nothing. Let them read in peace!
   }
 
   // 5. Complete the routing now that data is loaded
@@ -224,7 +223,8 @@ function showSetupModal() {
 }
 
 function openPwdModal() {
-  // Smart check: If you click Login but haven't set a password yet, switch to Setup mode
+  // FIX: Smart check when clicking "Login" button. 
+  // If no password is set yet, switch directly to Setup mode.
   const hasPwd = localStorage.getItem(KEY_PWD);
   if (!hasPwd) {
     showSetupModal();
