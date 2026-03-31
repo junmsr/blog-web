@@ -87,6 +87,21 @@ async function boot() {
   updateAboutSidebar();
 }
 
+function cancelEdit() {
+  if (editingId) {
+    // If you were editing an existing post, go back to reading it
+    const previousId = editingId;
+    resetEditor();
+    openPost(previousId);
+    toast('Edit cancelled.', 'success');
+  } else {
+    // If it was a brand new post, just go back home
+    resetEditor();
+    showView('home');
+    toast('Cancelled new post.', 'success');
+  }
+}
+
 // ══════════════════════════════════════════
 // MODE MANAGEMENT
 // ══════════════════════════════════════════
